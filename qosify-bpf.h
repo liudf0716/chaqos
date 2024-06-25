@@ -24,6 +24,14 @@
 
 #define QOSIFY_CLASS_FLAG_PRESENT	(1 << 0)
 
+#define RATE_ESTIMATOR 				(4)
+
+enum {
+	EGRESS,
+	INGRESS,
+	DIRECTION_MAX,
+};
+
 struct qosify_dscp_val {
 	uint8_t ingress;
 	uint8_t egress;
@@ -58,6 +66,16 @@ struct qosify_class {
 	uint8_t flags;
 
 	uint64_t packets;
+};
+
+struct pkt_stats {
+	uint32_t cur_s_bytes;
+	uint32_t prev_s_bytes;
+};
+
+struct qosify_ip_stats_val {
+	struct pkt_stats stats[DIRECTION_MAX];
+	uint32_t est_slot;
 };
 
 #endif

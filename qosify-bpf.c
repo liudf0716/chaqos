@@ -96,6 +96,22 @@ struct {
 			    QOSIFY_DEFAULT_CLASS_ENTRIES);
 } class_map SEC(".maps");
 
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(pinning, 1);
+	__type(key, struct in_addr);
+	__type(value, struct qosify_ip_stats_val);
+	__uint(max_entries, 100000);
+} ipv4_stats_map SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(pinning, 1);
+	__type(key, struct in6_addr);
+	__type(value, struct qosify_ip_stats_val);
+	__uint(max_entries, 100000);
+} ipv6_stats_map SEC(".maps");
+
 static struct qosify_config *get_config(void)
 {
 	__u32 key = 0;
@@ -327,6 +343,48 @@ check_flow(struct qosify_flow_config *config, struct __sk_buff *skb,
 	return ret;
 }
 
+static __always_inline __u32
+calc_rate_estimator(struct qosify_ip_stats_val *val, bool ingress)
+{
+#define	SMOOTH_VALUE	10
+	__u32 now = cur_time();
+	__u32 est_slot = now / RATE_ESTIMATOR;
+	__u32 rate = 0;
+	__u64 cur_bytes = 0;
+	__u32 delta = RATE_ESTIMATOR - (now % RATE_ESTIMATOR);
+	__u32 ratio = RATE_ESTIMATOR * SMOOTH_VALUE / delta;
+
+	if (val->est_slot == est_slot) {
+		rate = val->stats[ingress].prev_s_bytes;
+		cur_bytes = val->stats[ingress].cur_s_bytes;
+	} else if (val->est_slot == est_slot - 1) {
+		rate = val->stats[ingress].cur_s_bytes;
+	} else {
+		return 0;
+	}
+
+	rate = rate * SMOOTH_VALUE / ratio;
+	rate += cur_bytes;
+
+	return rate * 8 / RATE_ESTIMATOR;
+}
+
+static __always_inline void
+rate_estimator(struct qosify_ip_stats_val *val, __u32 est_slot, __u32 len, bool ingress)
+{
+	if (val->est_slot == est_slot) {
+		val->stats[ingress].cur_s_bytes += len;
+	} else {
+		if (val->est_slot == est_slot - 1) {
+			val->stats[ingress].prev_s_bytes = val->stats[ingress].cur_s_bytes;
+		} else {
+			val->stats[ingress].prev_s_bytes = 0;
+		}
+		val->stats[ingress].cur_s_bytes = 0;
+		val->est_slot = est_slot;
+	}
+}
+
 static __always_inline struct qosify_ip_map_val *
 parse_ipv4(struct qosify_config *config, struct skb_parser_info *info,
 	   bool ingress, __u8 *out_val)
@@ -335,6 +393,12 @@ parse_ipv4(struct qosify_config *config, struct skb_parser_info *info,
 	__u8 ipproto;
 	int hdr_len;
 	void *key;
+	struct qosify_ip_stats_val *val = NULL;
+	__u32 now = cur_time();
+	struct in_addr addr;
+	struct qosify_ip_stats_val new_val;
+	__builtin_memset(&addr, 0, sizeof(addr));
+	__builtin_memset(&new_val, 0, sizeof(new_val));
 
 	iph = skb_parse_ipv4(info, sizeof(struct udphdr));
 	if (!iph)
@@ -342,10 +406,21 @@ parse_ipv4(struct qosify_config *config, struct skb_parser_info *info,
 
 	parse_l4proto(config, info, ingress, out_val);
 
-	if (ingress)
+	if (ingress) {
 		key = &iph->saddr;
-	else
+		addr.s_addr = iph->saddr;
+	} else {
 		key = &iph->daddr;
+		addr.s_addr = iph->daddr;
+	}
+
+	val = bpf_map_lookup_elem(&ipv4_stats_map, &addr);
+	if (val) {
+		rate_estimator(val, now / RATE_ESTIMATOR, info->skb->len, ingress);
+	} else {
+		new_val.stats[ingress].cur_s_bytes = info->skb->len;
+		bpf_map_update_elem(&ipv4_stats_map, &addr, &new_val, BPF_ANY);
+	}
 
 	return bpf_map_lookup_elem(&ipv4_map, key);
 }
@@ -357,15 +432,32 @@ parse_ipv6(struct qosify_config *config, struct skb_parser_info *info,
 	struct ipv6hdr *iph;
 	__u8 ipproto;
 	void *key;
+	struct qosify_ip_stats_val *val = NULL;
+	__u32 now = cur_time();
+	struct in6_addr addr;
+	struct qosify_ip_stats_val new_val;
+	__builtin_memset(&addr, 0, sizeof(addr));
+	__builtin_memset(&new_val, 0, sizeof(new_val));
 
 	iph = skb_parse_ipv6(info, sizeof(struct udphdr));
 	if (!iph)
 		return NULL;
 
-	if (ingress)
+	if (ingress) {
+		memcpy(&addr, &iph->saddr, sizeof(addr));
 		key = &iph->saddr;
-	else
+	} else {
+		memcpy(&addr, &iph->daddr, sizeof(addr));
 		key = &iph->daddr;
+	}
+
+	val = bpf_map_lookup_elem(&ipv6_stats_map, &addr);
+	if (val) {
+		rate_estimator(val, now / RATE_ESTIMATOR, info->skb->len, ingress);
+	} else {
+		new_val.stats[ingress].cur_s_bytes = info->skb->len;
+		bpf_map_update_elem(&ipv6_stats_map, &addr, &new_val, BPF_ANY);
+	}
 
 	parse_l4proto(config, info, ingress, out_val);
 
