@@ -68,6 +68,16 @@ struct qosify_class {
 	uint64_t packets;
 };
 
+struct qosify_ipv4_mask_config {
+	uint32_t ip4;
+	uint32_t prefix;
+};
+
+struct qosify_ipv6_mask_config {
+	uint8_t	ip6[16];
+	uint32_t prefix;
+};
+
 struct pkt_stats {
 	uint32_t cur_s_bytes;
 	uint32_t prev_s_bytes;

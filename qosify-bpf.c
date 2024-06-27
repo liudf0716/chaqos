@@ -97,6 +97,22 @@ struct {
 } class_map SEC(".maps");
 
 struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(pinning, 1);
+	__type(key, __u32);
+	__type(value, struct qosify_ipv4_mask_config);
+	__uint(max_entries, 10);
+} ipv4_mask_map SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(pinning, 1);
+	__type(key, __u32);
+	__type(value, struct qosify_ipv6_mask_config);
+	__uint(max_entries, 10);
+} ipv6_mask_map SEC(".maps");
+
+struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(pinning, 1);
 	__type(key, struct in_addr);
@@ -106,7 +122,7 @@ struct {
 
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
-	__uint(pinning, 1);
+	__uint(pinning, 0);
 	__type(key, struct in6_addr);
 	__type(value, struct qosify_ip_stats_val);
 	__uint(max_entries, 100000);
@@ -119,6 +135,20 @@ static struct qosify_config *get_config(void)
 	return bpf_map_lookup_elem(&config, &key);
 }
 
+static struct qosify_ipv4_mask_config *get_ipv4_mask(void)
+{
+	__u32 key = 0;
+
+	return bpf_map_lookup_elem(&ipv4_mask_map, &key);
+}
+
+static struct qosify_ipv6_mask_config *get_ipv6_mask(void)
+{
+	__u32 key = 0;
+
+	return bpf_map_lookup_elem(&ipv6_mask_map, &key);
+}
+
 static __always_inline __u32 cur_time(void)
 {
 	__u32 val = bpf_ktime_get_ns() >> 24;
@@ -127,6 +157,11 @@ static __always_inline __u32 cur_time(void)
 		val = 1;
 
 	return val;
+}
+
+static __always_inline __u32 bits2mask(__u32 bits)
+{
+	return (bits? 0xffffffffU << (32 - bits) : 0);
 }
 
 static __always_inline __u32 ewma(__u32 *avg, __u32 val)
@@ -397,6 +432,9 @@ parse_ipv4(struct qosify_config *config, struct skb_parser_info *info,
 	__u32 now = cur_time();
 	struct in_addr addr;
 	struct qosify_ip_stats_val new_val;
+	struct qosify_ipv4_mask_config *mask = get_ipv4_mask();
+	__u32 addr_masked;
+
 	__builtin_memset(&addr, 0, sizeof(addr));
 	__builtin_memset(&new_val, 0, sizeof(new_val));
 
@@ -413,6 +451,14 @@ parse_ipv4(struct qosify_config *config, struct skb_parser_info *info,
 		key = &iph->daddr;
 		addr.s_addr = iph->daddr;
 	}
+
+	if (!mask) {
+		return bpf_map_lookup_elem(&ipv4_map, key);
+	}
+
+	addr_masked = addr.s_addr & htonl(bits2mask(mask->prefix));
+	if (addr_masked != mask->ip4)
+		return bpf_map_lookup_elem(&ipv4_map, key);
 
 	val = bpf_map_lookup_elem(&ipv4_stats_map, &addr);
 	if (val) {
@@ -436,6 +482,8 @@ parse_ipv6(struct qosify_config *config, struct skb_parser_info *info,
 	__u32 now = cur_time();
 	struct in6_addr addr;
 	struct qosify_ip_stats_val new_val;
+	struct qosify_ipv6_mask_config *mask = get_ipv6_mask();
+
 	__builtin_memset(&addr, 0, sizeof(addr));
 	__builtin_memset(&new_val, 0, sizeof(new_val));
 
@@ -449,6 +497,10 @@ parse_ipv6(struct qosify_config *config, struct skb_parser_info *info,
 	} else {
 		memcpy(&addr, &iph->daddr, sizeof(addr));
 		key = &iph->daddr;
+	}
+
+	if (!mask) {
+		return bpf_map_lookup_elem(&ipv6_map, key);
 	}
 
 	val = bpf_map_lookup_elem(&ipv6_stats_map, &addr);
