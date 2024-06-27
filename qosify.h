@@ -35,6 +35,10 @@ enum qosify_map_id {
 	CL_MAP_IPV6_ADDR,
 	CL_MAP_CLASS,
 	CL_MAP_CONFIG,
+	CL_MAP_IPV4_STATS,
+	CL_MAP_IPV6_STATS,
+	CL_MAP_IPV4_MASK,
+	CL_MAP_IPV6_MASK,
 	CL_MAP_DNS,
 	__CL_MAP_MAX,
 };
@@ -97,6 +101,8 @@ void qosify_map_update_config(void);
 void qosify_map_set_classes(struct blob_attr *val);
 int qosify_map_lookup_dns_entry(char *host, bool cname, uint8_t *dscp, uint32_t *seq);
 int qosify_map_add_dns_host(char *host, const char *addr, const char *type, int ttl);
+int qosify_map_set_ipv4_mask(char *ip4, uint32_t prefix);
+int qosify_map_set_ipv6_mask(char *ip6, uint32_t prefix);
 int map_parse_flow_config(struct qosify_flow_config *cfg, struct blob_attr *attr,
 			  bool reset);
 int map_fill_dscp_value(uint8_t *dest, struct blob_attr *attr, bool reset);

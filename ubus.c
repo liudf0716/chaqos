@@ -307,6 +307,51 @@ qosify_ubus_add_dns_host(struct ubus_context *ctx, struct ubus_object *obj,
 	return __qosify_ubus_add_dns_host(msg);
 }
 
+enum {
+	CL_MASK_TYPE,
+	CL_MASK_IPV4,
+	CL_MASK_IPV6,
+	CL_MASK_PREFIX,
+	__CL_MASK_MAX
+};
+
+static const struct blobmsg_policy qosify_mask_policy[__CL_MASK_MAX] = {
+	[CL_MASK_TYPE] = { "type", BLOBMSG_TYPE_INT32 },
+	[CL_MASK_IPV4] = { "ipv4", BLOBMSG_TYPE_STRING },
+	[CL_MASK_IPV6] = { "ipv6", BLOBMSG_TYPE_STRING },
+	[CL_MASK_PREFIX] = { "prefix", BLOBMSG_TYPE_INT32 },
+};
+
+static int
+qosify_ubus_add_mask(struct ubus_context *ctx, struct ubus_object *obj,
+		     struct ubus_request_data *req, const char *method,
+		     struct blob_attr *msg)
+{
+	struct blob_attr *tb[__CL_MASK_MAX];
+	uint32_t type = 0;
+
+	blobmsg_parse(qosify_mask_policy, __CL_MASK_MAX, tb,
+		      blobmsg_data(msg), blobmsg_len(msg));
+
+	if (!tb[CL_MASK_TYPE] || (!tb[CL_MASK_IPV4] && !tb[CL_MASK_IPV6]) || !tb[CL_MASK_PREFIX])
+		return UBUS_STATUS_INVALID_ARGUMENT;
+
+	type = blobmsg_get_u32(tb[CL_MASK_TYPE]);
+	if (type == 4) {
+		if (qosify_map_set_ipv4_mask(blobmsg_get_string(tb[CL_MASK_IPV4]),
+					     blobmsg_get_u32(tb[CL_MASK_PREFIX])))
+			return UBUS_STATUS_INVALID_ARGUMENT;
+	} else if (type == 6) {
+		if (qosify_map_set_ipv6_mask(blobmsg_get_string(tb[CL_MASK_IPV6]),
+					     blobmsg_get_u32(tb[CL_MASK_PREFIX])))
+			return UBUS_STATUS_INVALID_ARGUMENT;
+	} else {
+		return UBUS_STATUS_INVALID_ARGUMENT;
+	}
+	
+	return 0;
+}
+
 static const struct ubus_method qosify_methods[] = {
 	UBUS_METHOD_NOARG("reload", qosify_ubus_reload),
 	UBUS_METHOD("add", qosify_ubus_add, qosify_add_policy),
@@ -318,6 +363,7 @@ static const struct ubus_method qosify_methods[] = {
 	UBUS_METHOD_NOARG("get_stats", qosify_ubus_get_stats),
 	UBUS_METHOD("add_dns_host", qosify_ubus_add_dns_host, qosify_dns_policy),
 	UBUS_METHOD_NOARG("check_devices", qosify_ubus_check_devices),
+	UBUS_METHOD("mask", qosify_ubus_add_mask, qosify_mask_policy),
 };
 
 static struct ubus_object_type qosify_object_type =

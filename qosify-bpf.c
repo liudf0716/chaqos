@@ -122,7 +122,7 @@ struct {
 
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
-	__uint(pinning, 0);
+	__uint(pinning, 1);
 	__type(key, struct in6_addr);
 	__type(value, struct qosify_ip_stats_val);
 	__uint(max_entries, 100000);

@@ -54,6 +54,10 @@ static const struct {
 	[CL_MAP_CONFIG] = { "config", "config" },
 	[CL_MAP_CLASS] = { "class_map", "class" },
 	[CL_MAP_DNS] = { "dns", "dns" },
+	[CL_MAP_IPV4_STATS] = { "ipv4_stats_map", "ipv4_stats" },
+	[CL_MAP_IPV6_STATS] = { "ipv6_stats_map", "ipv6_stats" },
+	[CL_MAP_IPV4_MASK] = { "ipv4_mask_map", "ipv4_mask" },
+	[CL_MAP_IPV6_MASK] = { "ipv6_mask_map", "ipv6_mask" },
 };
 
 static const struct {
@@ -218,6 +222,8 @@ int qosify_map_init(void)
 
 	qosify_map_clear_list(CL_MAP_IPV4_ADDR);
 	qosify_map_clear_list(CL_MAP_IPV6_ADDR);
+	qosify_map_clear_list(CL_MAP_IPV4_STATS);
+	qosify_map_clear_list(CL_MAP_IPV6_STATS);
 	qosify_map_reset_config();
 
 	return 0;
@@ -797,6 +803,40 @@ int qosify_map_add_dns_host(char *host, const char *addr, const char *type, int 
 	__qosify_map_set_entry(&data);
 	qosify_map_timeout = prev_timeout;
 
+	return 0;
+}
+
+int qosify_map_set_ipv4_mask(char *ip4, uint32_t prefix)
+{
+	int fd = qosify_map_fds[CL_MAP_IPV4_MASK];
+	struct qosify_ipv4_mask_config config;
+	uint32_t key = 0;
+	// check if the ip4 is valid
+	if (inet_pton(AF_INET, ip4, &config.ip4) != 1)
+		return -1;
+	if (prefix > 32)
+		return -1;
+
+	config.prefix = prefix;
+
+	bpf_map_update_elem(fd, &key, &config, BPF_ANY);
+	return 0;
+}
+
+int qosify_map_set_ipv6_mask(char *ip6, uint32_t prefix)
+{
+	int fd = qosify_map_fds[CL_MAP_IPV6_MASK];
+	struct qosify_ipv6_mask_config config;
+	uint32_t key = 0;
+
+	if (inet_pton(AF_INET6, ip6, &config.ip6) != 1)
+		return -1;
+	if (prefix > 128)
+		return -1;
+		
+	config.prefix = prefix;
+
+	bpf_map_update_elem(fd, &key, &config, BPF_ANY);
 	return 0;
 }
 
