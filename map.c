@@ -141,7 +141,7 @@ static int qosify_map_get_fd(enum qosify_map_id id)
 	return fd;
 }
 
-static void qosify_map_clear_list(enum qosify_map_id id)
+void qosify_map_clear_list(enum qosify_map_id id)
 {
 	int fd = qosify_map_fds[id];
 	__u32 key[4] = {};

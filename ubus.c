@@ -341,10 +341,14 @@ qosify_ubus_add_mask(struct ubus_context *ctx, struct ubus_object *obj,
 		if (qosify_map_set_ipv4_mask(blobmsg_get_string(tb[CL_MASK_IPV4]),
 					     blobmsg_get_u32(tb[CL_MASK_PREFIX])))
 			return UBUS_STATUS_INVALID_ARGUMENT;
+
+		qosify_map_clear_list(CL_MAP_IPV4_STATS);
 	} else if (type == 6) {
 		if (qosify_map_set_ipv6_mask(blobmsg_get_string(tb[CL_MASK_IPV6]),
 					     blobmsg_get_u32(tb[CL_MASK_PREFIX])))
 			return UBUS_STATUS_INVALID_ARGUMENT;
+			
+		qosify_map_clear_list(CL_MAP_IPV6_STATS);
 	} else {
 		return UBUS_STATUS_INVALID_ARGUMENT;
 	}
