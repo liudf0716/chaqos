@@ -893,8 +893,8 @@ calc_rate_estimator(struct qosify_ip_stats_val *val, bool ingress)
 }
 
 const char *direction_str[] = {
-	"ingress",
 	"egress",
+	"ingress",
 };
 
 void qosify_map_show_ip4_stats(struct blob_buf *b)
@@ -911,7 +911,7 @@ void qosify_map_show_ip4_stats(struct blob_buf *b)
 			break;
 
 		void *c = blobmsg_open_table(b, NULL);
-		blobmsg_add_string(b, "addr", inet_ntoa(*(struct in_addr *)&key));
+		blobmsg_add_string(b, "addr", inet_ntoa(*(struct in_addr *)&next_key));
 		for (int i = 0; i < DIRECTION_MAX; i++) {
 			blobmsg_add_u32(b, direction_str[i], calc_rate_estimator(&stats, i));
 		}

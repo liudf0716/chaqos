@@ -159,6 +159,16 @@ static __always_inline __u32 cur_time(void)
 	return val;
 }
 
+static __always_inline __u32 cur_time_sec(void)
+{
+	__u32 val = bpf_ktime_get_ns() / 1000000000;
+
+	if (!val)
+		val = 1;
+
+	return val;
+}
+
 static __always_inline __u32 bits2mask(__u32 bits)
 {
 	return (bits? 0xffffffffU << (32 - bits) : 0);
@@ -382,7 +392,7 @@ static __always_inline __u32
 calc_rate_estimator(struct qosify_ip_stats_val *val, bool ingress)
 {
 #define	SMOOTH_VALUE	10
-	__u32 now = cur_time();
+	__u32 now = cur_time_sec();
 	__u32 est_slot = now / RATE_ESTIMATOR;
 	__u32 rate = 0;
 	__u64 cur_bytes = 0;
@@ -429,7 +439,7 @@ parse_ipv4(struct qosify_config *config, struct skb_parser_info *info,
 	int hdr_len;
 	void *key;
 	struct qosify_ip_stats_val *val = NULL;
-	__u32 now = cur_time();
+	__u32 now = cur_time_sec();
 	struct in_addr addr;
 	struct qosify_ip_stats_val new_val;
 	struct qosify_ipv4_mask_config *mask = get_ipv4_mask();
