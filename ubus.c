@@ -348,7 +348,20 @@ qosify_ubus_add_mask(struct ubus_context *ctx, struct ubus_object *obj,
 	} else {
 		return UBUS_STATUS_INVALID_ARGUMENT;
 	}
-	
+
+	return 0;
+}
+
+static int
+qosify_ubus_show_ip4_stats(struct ubus_context *ctx, struct ubus_object *obj,
+			   struct ubus_request_data *req, const char *method,
+			   struct blob_attr *msg)
+{
+	blob_buf_init(&b, 0);
+	qosify_map_show_ip4_stats(&b);
+	ubus_send_reply(ctx, req, b.head);
+	blob_buf_free(&b);
+
 	return 0;
 }
 
@@ -364,6 +377,7 @@ static const struct ubus_method qosify_methods[] = {
 	UBUS_METHOD("add_dns_host", qosify_ubus_add_dns_host, qosify_dns_policy),
 	UBUS_METHOD_NOARG("check_devices", qosify_ubus_check_devices),
 	UBUS_METHOD("mask", qosify_ubus_add_mask, qosify_mask_policy),
+	UBUS_METHOD_NOARG("show_ip4_stats", qosify_ubus_show_ip4_stats),
 };
 
 static struct ubus_object_type qosify_object_type =

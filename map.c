@@ -53,11 +53,11 @@ static const struct {
 	[CL_MAP_IPV6_ADDR] = { "ipv6_map", "ipv6_addr" },
 	[CL_MAP_CONFIG] = { "config", "config" },
 	[CL_MAP_CLASS] = { "class_map", "class" },
-	[CL_MAP_DNS] = { "dns", "dns" },
 	[CL_MAP_IPV4_STATS] = { "ipv4_stats_map", "ipv4_stats" },
 	[CL_MAP_IPV6_STATS] = { "ipv6_stats_map", "ipv6_stats" },
 	[CL_MAP_IPV4_MASK] = { "ipv4_mask_map", "ipv4_mask" },
 	[CL_MAP_IPV6_MASK] = { "ipv6_mask_map", "ipv6_mask" },
+	[CL_MAP_DNS] = { "dns", "dns" },
 };
 
 static const struct {
@@ -866,6 +866,60 @@ blobmsg_add_dscp(struct blob_buf *b, const char *name, uint8_t dscp)
 	blobmsg_add_string_buffer(b);
 }
 
+static uint32_t
+calc_rate_estimator(struct qosify_ip_stats_val *val, bool ingress)
+{
+#define	SMOOTH_VALUE	10
+	uint32_t now = qosify_gettime();
+	uint32_t est_slot = now / RATE_ESTIMATOR;
+	uint32_t rate = 0;
+	uint32_t cur_bytes = 0;
+	uint32_t delta = RATE_ESTIMATOR - (now % RATE_ESTIMATOR);
+	uint32_t ratio = RATE_ESTIMATOR * SMOOTH_VALUE / delta;
+
+	if (val->est_slot == est_slot) {
+		rate = val->stats[ingress].prev_s_bytes;
+		cur_bytes = val->stats[ingress].cur_s_bytes;
+	} else if (val->est_slot == est_slot - 1) {
+		rate = val->stats[ingress].cur_s_bytes;
+	} else {
+		return 0;
+	}
+
+	rate = rate * SMOOTH_VALUE / ratio;
+	rate += cur_bytes;
+
+	return rate * 8 / RATE_ESTIMATOR;
+}
+
+const char *direction_str[] = {
+	"ingress",
+	"egress",
+};
+
+void qosify_map_show_ip4_stats(struct blob_buf *b)
+{
+	struct qosify_ip_stats_val stats;
+	uint32_t key = 0;
+	uint32_t next_key;
+	int fd = qosify_map_fds[CL_MAP_IPV4_STATS];
+	void *a;
+	
+	a = blobmsg_open_array(b, "ipv4_stats");
+	while (bpf_map_get_next_key(fd, &key, &next_key) == 0) {
+		if (bpf_map_lookup_elem(fd, &next_key, &stats) < 0)
+			break;
+
+		void *c = blobmsg_open_table(b, NULL);
+		blobmsg_add_string(b, "addr", inet_ntoa(*(struct in_addr *)&key));
+		for (int i = 0; i < DIRECTION_MAX; i++) {
+			blobmsg_add_u32(b, direction_str[i], calc_rate_estimator(&stats, i));
+		}
+		blobmsg_close_table(b, c);
+		key = next_key;
+	}
+	blobmsg_close_array(b, a);
+}
 
 void qosify_map_dump(struct blob_buf *b)
 {
