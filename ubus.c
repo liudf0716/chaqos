@@ -347,7 +347,7 @@ qosify_ubus_add_mask(struct ubus_context *ctx, struct ubus_object *obj,
 		if (qosify_map_set_ipv6_mask(blobmsg_get_string(tb[CL_MASK_IPV6]),
 					     blobmsg_get_u32(tb[CL_MASK_PREFIX])))
 			return UBUS_STATUS_INVALID_ARGUMENT;
-			
+
 		qosify_map_clear_list(CL_MAP_IPV6_STATS);
 	} else {
 		return UBUS_STATUS_INVALID_ARGUMENT;
@@ -369,6 +369,19 @@ qosify_ubus_show_ip4_stats(struct ubus_context *ctx, struct ubus_object *obj,
 	return 0;
 }
 
+static int
+qosify_ubus_show_ip6_stats(struct ubus_context *ctx, struct ubus_object *obj,
+			   struct ubus_request_data *req, const char *method,
+			   struct blob_attr *msg)
+{
+	blob_buf_init(&b, 0);
+	qosify_map_show_ip6_stats(&b);
+	ubus_send_reply(ctx, req, b.head);
+	blob_buf_free(&b);
+
+	return 0;
+}
+
 static const struct ubus_method qosify_methods[] = {
 	UBUS_METHOD_NOARG("reload", qosify_ubus_reload),
 	UBUS_METHOD("add", qosify_ubus_add, qosify_add_policy),
@@ -382,6 +395,7 @@ static const struct ubus_method qosify_methods[] = {
 	UBUS_METHOD_NOARG("check_devices", qosify_ubus_check_devices),
 	UBUS_METHOD("mask", qosify_ubus_add_mask, qosify_mask_policy),
 	UBUS_METHOD_NOARG("show_ip4_stats", qosify_ubus_show_ip4_stats),
+	UBUS_METHOD_NOARG("show_ip6_stats", qosify_ubus_show_ip6_stats),
 };
 
 static struct ubus_object_type qosify_object_type =

@@ -921,6 +921,32 @@ void qosify_map_show_ip4_stats(struct blob_buf *b)
 	blobmsg_close_array(b, a);
 }
 
+void qosify_map_show_ip6_stats(struct blob_buf *b)
+{
+	struct qosify_ip_stats_val stats;
+	uint32_t key[4] = {0};
+	uint32_t next_key[4];
+	int fd = qosify_map_fds[CL_MAP_IPV6_STATS];
+	void *a;
+
+	a = blobmsg_open_array(b, "ipv6_stats");
+	while (bpf_map_get_next_key(fd, key, next_key) == 0) {
+		if (bpf_map_lookup_elem(fd, next_key, &stats) < 0)
+			break;
+
+		void *c = blobmsg_open_table(b, NULL);
+		char buf[INET6_ADDRSTRLEN] = {0};
+		inet_ntop(AF_INET6, next_key, buf, sizeof(buf));
+		blobmsg_add_string(b, "addr", buf);
+		for (int i = 0; i < DIRECTION_MAX; i++) {
+			blobmsg_add_u32(b, direction_str[i], calc_rate_estimator(&stats, i));
+		}
+		blobmsg_close_table(b, c);
+		memcpy(key, next_key, sizeof(key));
+	}
+	blobmsg_close_array(b, a);
+}
+
 void qosify_map_dump(struct blob_buf *b)
 {
 	struct qosify_map_entry *e;
