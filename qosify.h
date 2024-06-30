@@ -105,6 +105,7 @@ int qosify_map_set_ipv4_mask(char *ip4, uint32_t prefix);
 int qosify_map_set_ipv6_mask(char *ip6, uint32_t prefix);
 void qosify_map_show_ip4_stats(struct blob_buf *b);
 void qosify_map_show_ip6_stats(struct blob_buf *b);
+void qosify_net_mask_config_update(struct blob_attr *attr);
 void qosify_map_clear_list(enum qosify_map_id id);
 int map_parse_flow_config(struct qosify_flow_config *cfg, struct blob_attr *attr,
 			  bool reset);

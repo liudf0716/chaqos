@@ -133,6 +133,7 @@ enum {
 	CL_CONFIG_INTERFACES,
 	CL_CONFIG_DEVICES,
 	CL_CONFIG_CLASSES,
+	CL_CONFIG_NET_MASK,
 	__CL_CONFIG_MAX
 };
 
@@ -146,6 +147,7 @@ static const struct blobmsg_policy qosify_config_policy[__CL_CONFIG_MAX] = {
 	[CL_CONFIG_INTERFACES] = { "interfaces", BLOBMSG_TYPE_TABLE },
 	[CL_CONFIG_DEVICES] = { "devices", BLOBMSG_TYPE_TABLE },
 	[CL_CONFIG_CLASSES] = { "classes", BLOBMSG_TYPE_TABLE },
+	[CL_CONFIG_NET_MASK] = { "masks", BLOBMSG_TYPE_TABLE },
 };
 
 static int
@@ -177,6 +179,10 @@ qosify_ubus_config(struct ubus_context *ctx, struct ubus_object *obj,
 	if ((cur = tb[CL_CONFIG_FILES]) != NULL &&
 	    (ret = qosify_ubus_set_files(cur) != 0))
 		return ret;
+
+	if ((cur = tb[CL_CONFIG_NET_MASK]) != NULL) {
+		qosify_net_mask_config_update(tb[CL_CONFIG_NET_MASK]);
+	}
 
 	if (map_parse_flow_config(&flow_config, msg, reset) ||
 	    map_fill_dscp_value(&config.dscp_icmp, tb[CL_CONFIG_DSCP_ICMP], reset))

@@ -806,6 +806,43 @@ int qosify_map_add_dns_host(char *host, const char *addr, const char *type, int 
 	return 0;
 }
 
+
+
+void qosify_net_mask_config_update(struct blob_attr *val)
+{
+	enum {
+		CL_MAP_TYPE,
+		CL_MAP_ADDR,
+		CL_MAP_PREFIX,
+		__NETMASK_MAX,
+	};
+	static const struct blobmsg_policy netmask_policy[__NETMASK_MAX] = {
+		[CL_MAP_TYPE] = { .name = "type", .type = BLOBMSG_TYPE_STRING },
+		[CL_MAP_ADDR] = { .name = "addr", .type = BLOBMSG_TYPE_STRING },
+		[CL_MAP_PREFIX] = { .name = "prefix", .type = BLOBMSG_TYPE_INT32 },
+	};
+	struct blob_attr *tb[__NETMASK_MAX];
+	struct blob_attr *cur;
+	int rem;
+
+	if (!val)
+		return;
+
+	blobmsg_for_each_attr(cur, val, rem) {
+		blobmsg_parse(netmask_policy, __NETMASK_MAX, tb, blobmsg_data(cur), blobmsg_data_len(cur));
+		if (!tb[CL_MAP_TYPE] || !tb[CL_MAP_ADDR] || !tb[CL_MAP_PREFIX])
+			continue;
+		const char *type = blobmsg_get_string(tb[CL_MAP_TYPE]);
+		if (strcmp(type, "ipv4") == 0) {
+			qosify_map_set_ipv4_mask(blobmsg_get_string(tb[CL_MAP_ADDR]), blobmsg_get_u32(tb[CL_MAP_PREFIX]));
+		} else if (strcmp(type, "ipv6") == 0) {
+			qosify_map_set_ipv6_mask(blobmsg_get_string(tb[CL_MAP_ADDR]), blobmsg_get_u32(tb[CL_MAP_PREFIX]));
+		} else {
+			fprintf(stderr, "Invalid type %s\n", type);
+		}
+	}
+}
+
 int qosify_map_set_ipv4_mask(char *ip4, uint32_t prefix)
 {
 	int fd = qosify_map_fds[CL_MAP_IPV4_MASK];
