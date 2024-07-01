@@ -81,6 +81,8 @@ struct qosify_ipv6_mask_config {
 struct pkt_stats {
 	uint32_t cur_s_bytes;
 	uint32_t prev_s_bytes;
+	uint64_t total_bytes;
+	uint64_t total_packets;
 };
 
 struct qosify_ip_stats_val {

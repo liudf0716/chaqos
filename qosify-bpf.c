@@ -428,6 +428,9 @@ rate_estimator(struct qosify_ip_stats_val *val, __u32 est_slot, __u32 len, bool 
 		val->stats[ingress].cur_s_bytes = 0;
 		val->est_slot = est_slot;
 	}
+
+	val->stats[ingress].total_bytes += len;
+	val->stats[ingress].total_packets++;
 }
 
 static __always_inline struct qosify_ip_map_val *
@@ -475,6 +478,8 @@ parse_ipv4(struct qosify_config *config, struct skb_parser_info *info,
 		rate_estimator(val, now / RATE_ESTIMATOR, info->skb->len, ingress);
 	} else {
 		new_val.stats[ingress].cur_s_bytes = info->skb->len;
+		new_val.stats[ingress].total_bytes = info->skb->len;
+		new_val.stats[ingress].total_packets = 1;
 		bpf_map_update_elem(&ipv4_stats_map, &addr, &new_val, BPF_ANY);
 	}
 
