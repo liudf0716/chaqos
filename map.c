@@ -929,9 +929,19 @@ calc_rate_estimator(struct qosify_ip_stats_val *val, bool ingress)
 	return rate * 8 / RATE_ESTIMATOR;
 }
 
-const char *direction_str[] = {
+const char *dir_rate_str[] = {
 	"egress",
 	"ingress",
+};
+
+const char *dir_bytes_str[] = {
+	"egress_bytes",
+	"ingress_bytes",
+};
+
+const char *dir_packets_str[] = {
+	"egress_packets",
+	"ingress_packets",
 };
 
 void qosify_map_show_ip4_stats(struct blob_buf *b)
@@ -950,7 +960,9 @@ void qosify_map_show_ip4_stats(struct blob_buf *b)
 		void *c = blobmsg_open_table(b, NULL);
 		blobmsg_add_string(b, "addr", inet_ntoa(*(struct in_addr *)&next_key));
 		for (int i = 0; i < DIRECTION_MAX; i++) {
-			blobmsg_add_u32(b, direction_str[i], calc_rate_estimator(&stats, i));
+			blobmsg_add_u32(b, dir_rate_str[i], calc_rate_estimator(&stats, i));
+			blobmsg_add_u64(b, dir_bytes_str[i], stats.stats[i].total_bytes);
+			blobmsg_add_u64(b, dir_packets_str[i], stats.stats[i].total_packets);
 		}
 		blobmsg_close_table(b, c);
 		key = next_key;
@@ -976,7 +988,9 @@ void qosify_map_show_ip6_stats(struct blob_buf *b)
 		inet_ntop(AF_INET6, next_key, buf, sizeof(buf));
 		blobmsg_add_string(b, "addr", buf);
 		for (int i = 0; i < DIRECTION_MAX; i++) {
-			blobmsg_add_u32(b, direction_str[i], calc_rate_estimator(&stats, i));
+			blobmsg_add_u32(b, dir_rate_str[i], calc_rate_estimator(&stats, i));
+			blobmsg_add_u64(b, dir_bytes_str[i], stats.stats[i].total_bytes);
+			blobmsg_add_u64(b, dir_packets_str[i], stats.stats[i].total_packets);
 		}
 		blobmsg_close_table(b, c);
 		memcpy(key, next_key, sizeof(key));
