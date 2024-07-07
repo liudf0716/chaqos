@@ -856,6 +856,8 @@ int qosify_map_set_ipv4_mask(char *ip4, uint32_t prefix)
 
 	config.prefix = prefix;
 
+	config.ip4 = config.ip4 & htonl((0xFFFFFFFF << (32 - prefix)));
+
 	bpf_map_update_elem(fd, &key, &config, BPF_ANY);
 	return 0;
 }
