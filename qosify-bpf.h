@@ -26,6 +26,9 @@
 
 #define RATE_ESTIMATOR 				(4)
 
+#define MIN_TCP_PAYLOAD_LEN 20
+#define MIN_UDP_PAYLOAD_LEN 8
+
 enum {
 	EGRESS,
 	INGRESS,
@@ -85,9 +88,36 @@ struct pkt_stats {
 	uint64_t total_packets;
 };
 
-struct qosify_ip_stats_val {
+struct qosify_traffic_stats_val {
 	struct pkt_stats stats[DIRECTION_MAX];
 	uint32_t est_slot;
+};
+
+struct qosify_flowv4_keys {
+	uint32_t src_ip;
+	uint32_t dst_ip;
+	uint16_t src_port;
+	uint16_t dst_port;
+	uint8_t proto;
+};
+
+struct qosify_flowv6_keys {
+	uint32_t src_ip[4];
+	uint32_t dst_ip[4];
+	uint16_t src_port;
+	uint16_t dst_port;
+	uint8_t proto;
+};
+
+struct qosify_conn_stats {
+	struct qosify_traffic_stats_val val;
+	uint16_t dpi_id;
+	uint16_t dpi_pkt_num;
+};
+
+struct qosify_dpi_list {
+	uint16_t dpi_id;
+	uint16_t dpi_pkt_num;
 };
 
 #endif

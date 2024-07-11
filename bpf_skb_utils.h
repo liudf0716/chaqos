@@ -172,4 +172,27 @@ skb_parse_tcp(struct skb_parser_info *info)
 	return tcph;
 }
 
+static __always_inline struct udphdr *
+skb_parse_udp(struct skb_parser_info *info)
+{
+	struct udphdr *udph;
+
+	if (info->proto != IPPROTO_UDP)
+		return NULL;
+
+	udph = skb_info_ptr(info, sizeof(*udph));
+	if (!udph)
+		return NULL;
+
+	info->offset += sizeof(*udph);
+
+	return udph;
+}
+
+static __always_inline void *
+skb_parse_tcp_payload(struct skb_parser_info *info)
+{
+	return skb_info_ptr(info, info->skb->len - info->offset);
+}
+
 #endif

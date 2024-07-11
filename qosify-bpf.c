@@ -19,6 +19,7 @@
 #include <bpf/bpf_endian.h>
 #include "bpf_skb_utils.h"
 #include "qosify-bpf.h"
+#include "jhash.h"
 
 #define INET_ECN_MASK 3
 
@@ -27,6 +28,7 @@
 #define FLOW_BULK_TIMEOUT	5
 
 #define EWMA_SHIFT		12
+#define DPI_MAX_NUM		1024
 
 #define bpf_printk(fmt, ...)					\
 ({								\
@@ -123,17 +125,41 @@ struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(pinning, 1);
 	__type(key, struct in_addr);
-	__type(value, struct qosify_ip_stats_val);
-	__uint(max_entries, 100000);
+	__type(value, struct qosify_traffic_stats_val);
+	__uint(max_entries, 2000);
 } ipv4_stats_map SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(pinning, 1);
 	__type(key, struct in6_addr);
-	__type(value, struct qosify_ip_stats_val);
-	__uint(max_entries, 100000);
+	__type(value, struct qosify_traffic_stats_val);
+	__uint(max_entries, 2000);
 } ipv6_stats_map SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(pinning, 1);
+	__type(key, struct qosify_flowv4_keys);
+	__type(value, struct qosify_conn_stats);
+	__uint(max_entries, 100000);
+} flow_table_v4 SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(pinning, 1);
+	__type(key, struct qosify_flowv6_keys);
+	__type(value, struct qosify_conn_stats);
+	__uint(max_entries, 100000);
+} flow_table_v6 SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(pinning, 1);
+	__type(key, __u32);
+	__type(value, struct qosify_traffic_stats_val);
+	__uint(max_entries, DPI_MAX_NUM);
+} dpi_stats_map SEC(".maps");
 
 static struct qosify_config *get_config(void)
 {
@@ -154,6 +180,17 @@ static struct qosify_ipv6_mask_config *get_ipv6_mask(void)
 	__u32 key = 0;
 
 	return bpf_map_lookup_elem(&ipv6_mask_map, &key);
+}
+
+static __always_inline __u32
+hash_tuple4(struct qosify_flowv4_keys *keys)
+{
+	__u32 hash = 0;
+
+	hash = jhash_3words(keys->src_ip, keys->dst_ip, keys->src_port, 0);
+	hash = jhash_2words(keys->dst_port, keys->proto, hash);
+
+	return hash;
 }
 
 static __always_inline __u32 cur_time(void)
@@ -396,7 +433,7 @@ check_flow(struct qosify_flow_config *config, struct __sk_buff *skb,
 }
 
 static __always_inline __u32
-calc_rate_estimator(struct qosify_ip_stats_val *val, bool ingress)
+calc_rate_estimator(struct qosify_traffic_stats_val *val, bool ingress)
 {
 #define	SMOOTH_VALUE	10
 	__u32 now = cur_time_sec();
@@ -422,10 +459,11 @@ calc_rate_estimator(struct qosify_ip_stats_val *val, bool ingress)
 }
 
 static __always_inline void
-rate_estimator(struct qosify_ip_stats_val *val, __u32 est_slot, __u32 len, bool ingress)
+rate_estimator(struct qosify_traffic_stats_val *val, __u32 est_slot, __u32 len, bool ingress)
 {
 	if (val->est_slot == est_slot) {
 		val->stats[ingress].cur_s_bytes += len;
+		//__sync_fetch_and_add(&val->stats[ingress].total_bytes, len);
 	} else {
 		if (val->est_slot == est_slot - 1) {
 			val->stats[ingress].prev_s_bytes = val->stats[ingress].cur_s_bytes;
@@ -440,6 +478,125 @@ rate_estimator(struct qosify_ip_stats_val *val, __u32 est_slot, __u32 len, bool 
 	val->stats[ingress].total_packets++;
 }
 
+static  __u16
+dpi_engine_match(__u8 proto, __u16 dport, const __u8 *payload, __u32 payload_len, bool ingress)
+{
+	__u16 dpi_id = 0;
+
+	if (proto == IPPROTO_TCP) {
+		if (dport == 80) {
+			if (payload_len >= 4 && payload[0] == 'G' && payload[1] == 'E' &&
+			    payload[2] == 'T' && payload[3] == ' ') {
+				dpi_id = 1;
+			}
+		}
+
+	} else if (proto == IPPROTO_UDP) {
+		if (dport == 53) {
+			if (payload_len >= 2 && payload[0] == 0x00 && payload[1] == 0x01) {
+				dpi_id = 2;
+			}
+		}
+	}
+
+	return dpi_id;
+}
+
+static __always_inline __u8
+check_tcp_finish(struct tcphdr *tcph)
+{
+	// if tcp packet is finish the connection then return 1
+	if (tcph->fin || tcph->rst)
+		return 1;
+
+	return 0;
+}
+
+static __always_inline void
+dpi4_engine(struct iphdr *iph, struct skb_parser_info *info, bool ingress, __u32 now)
+{
+	struct qosify_flowv4_keys keys;
+	struct qosify_conn_stats *stats;
+	struct qosify_traffic_stats_val *dpi_val;
+	const __u8 *payload = NULL;
+	__u32 payload_len = 0;
+	__u32 key = 0;
+	__u8 dpi_max_check = 0;
+	struct qosify_conn_stats new_stats;
+
+	__builtin_memset(&keys, 0, sizeof(keys));
+	keys.proto = iph->protocol;
+	keys.src_ip = ingress? iph->saddr : iph->daddr;
+	keys.dst_ip = ingress? iph->daddr : iph->saddr;
+	if(iph->protocol == IPPROTO_TCP) {
+		struct tcphdr *tcph = skb_parse_tcp(info);
+		if (!tcph)
+			return;
+		keys.src_port = ingress? tcph->source : tcph->dest;
+		keys.dst_port = ingress? tcph->dest : tcph->source;
+		if (check_tcp_finish(tcph)) {
+			if (bpf_map_lookup_elem(&flow_table_v4, &keys))
+				bpf_map_delete_elem(&flow_table_v4, &keys);
+			return;
+		}
+		payload = skb_info_ptr(info, MIN_TCP_PAYLOAD_LEN);
+		if (!payload)
+			return;
+		payload_len = info->skb->len - info->offset;
+		dpi_max_check = 2;
+	} else if(iph->protocol == IPPROTO_UDP) {
+		struct udphdr *udph = skb_parse_udp(info);
+		if (!udph)
+			return;
+		keys.src_port = ingress? udph->source : udph->dest;
+		keys.dst_port = ingress? udph->dest : udph->source;
+		payload = skb_info_ptr(info, MIN_UDP_PAYLOAD_LEN);
+		if (!payload)
+			return;
+		payload_len = info->skb->len - info->offset;
+		dpi_max_check = 3;
+	} else {
+		return;
+	}
+
+	if (payload_len == 0) {
+		return;
+	}
+
+	stats = bpf_map_lookup_elem(&flow_table_v4, &keys);
+	if (stats) {
+		if (!stats->dpi_id && stats->dpi_pkt_num >= dpi_max_check){
+			stats->dpi_id = DPI_MAX_NUM;
+		} else if (!stats->dpi_id && ingress) {
+			stats->dpi_id = dpi_engine_match(keys.proto, keys.dst_port, payload, payload_len, ingress);
+			stats->dpi_pkt_num++;
+		}
+		rate_estimator(&stats->val, now, info->skb->len, ingress);
+		bpf_map_update_elem(&flow_table_v4, &keys, stats, BPF_ANY);
+		if (stats->dpi_id) {
+			dpi_val = bpf_map_lookup_elem(&dpi_stats_map, &stats->dpi_id);
+			if (dpi_val) {
+				rate_estimator(dpi_val, now, payload_len, ingress);
+				bpf_map_update_elem(&dpi_stats_map, &stats->dpi_id, dpi_val, BPF_ANY);
+			} else {
+				struct qosify_traffic_stats_val new_val;
+				__builtin_memset(&new_val, 0, sizeof(new_val));
+				new_val.stats[ingress].cur_s_bytes = payload_len;
+				new_val.stats[ingress].total_bytes = payload_len;
+				new_val.stats[ingress].total_packets = 1;
+				bpf_map_update_elem(&dpi_stats_map, &stats->dpi_id, &new_val, BPF_ANY);
+			}
+		}
+	} else {
+		__builtin_memset(&new_stats, 0, sizeof(new_stats));
+		new_stats.val.est_slot = now;
+		new_stats.val.stats[ingress].cur_s_bytes = info->skb->len;
+		new_stats.val.stats[ingress].total_bytes = info->skb->len;
+		new_stats.val.stats[ingress].total_packets = 1;
+		bpf_map_update_elem(&flow_table_v4, &keys, &new_stats, BPF_ANY);
+	}
+}
+
 static __always_inline struct qosify_ip_map_val *
 parse_ipv4(struct qosify_config *config, struct skb_parser_info *info,
 	   bool ingress, __u8 *out_val)
@@ -448,10 +605,10 @@ parse_ipv4(struct qosify_config *config, struct skb_parser_info *info,
 	__u8 ipproto;
 	int hdr_len;
 	void *key;
-	struct qosify_ip_stats_val *val = NULL;
-	__u32 now = cur_time_sec();
+	struct qosify_traffic_stats_val *val = NULL;
+	__u32 now = cur_time_sec() / RATE_ESTIMATOR;
 	struct in_addr addr;
-	struct qosify_ip_stats_val new_val;
+	struct qosify_traffic_stats_val new_val;
 	struct qosify_ipv4_mask_config *mask = get_ipv4_mask();
 	__u32 addr_masked;
 
@@ -480,9 +637,12 @@ parse_ipv4(struct qosify_config *config, struct skb_parser_info *info,
 	if (addr_masked != mask->ip4)
 		return bpf_map_lookup_elem(&ipv4_map, key);
 
+	dpi4_engine(iph, info, ingress, now);
+
 	val = bpf_map_lookup_elem(&ipv4_stats_map, &addr);
 	if (val) {
-		rate_estimator(val, now / RATE_ESTIMATOR, info->skb->len, ingress);
+		rate_estimator(val, now, info->skb->len, ingress);
+		bpf_map_update_elem(&ipv4_stats_map, &addr, val, BPF_ANY);
 	} else {
 		new_val.stats[ingress].cur_s_bytes = info->skb->len;
 		new_val.stats[ingress].total_bytes = info->skb->len;
@@ -500,10 +660,10 @@ parse_ipv6(struct qosify_config *config, struct skb_parser_info *info,
 	struct ipv6hdr *iph;
 	__u8 ipproto;
 	void *key;
-	struct qosify_ip_stats_val *val = NULL;
+	struct qosify_traffic_stats_val *val = NULL;
 	__u32 now = cur_time();
 	struct in6_addr addr;
-	struct qosify_ip_stats_val new_val;
+	struct qosify_traffic_stats_val new_val;
 	struct qosify_ipv6_mask_config *mask = get_ipv6_mask();
 
 	__builtin_memset(&addr, 0, sizeof(addr));

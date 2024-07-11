@@ -906,7 +906,7 @@ blobmsg_add_dscp(struct blob_buf *b, const char *name, uint8_t dscp)
 }
 
 static uint32_t
-calc_rate_estimator(struct qosify_ip_stats_val *val, bool ingress)
+calc_rate_estimator(struct qosify_traffic_stats_val *val, bool ingress)
 {
 #define	SMOOTH_VALUE	10
 	uint32_t now = qosify_gettime();
@@ -948,7 +948,7 @@ const char *dir_packets_str[] = {
 
 void qosify_map_show_ip4_stats(struct blob_buf *b)
 {
-	struct qosify_ip_stats_val stats;
+	struct qosify_traffic_stats_val stats;
 	uint32_t key = 0;
 	uint32_t next_key;
 	int fd = qosify_map_fds[CL_MAP_IPV4_STATS];
@@ -974,7 +974,7 @@ void qosify_map_show_ip4_stats(struct blob_buf *b)
 
 void qosify_map_show_ip6_stats(struct blob_buf *b)
 {
-	struct qosify_ip_stats_val stats;
+	struct qosify_traffic_stats_val stats;
 	uint32_t key[4] = {0};
 	uint32_t next_key[4];
 	int fd = qosify_map_fds[CL_MAP_IPV6_STATS];
