@@ -120,4 +120,14 @@ struct qosify_dpi_list {
 	uint16_t dpi_pkt_num;
 };
 
+struct qosify_dpi_match_pattern {
+	uint16_t dpi_id;
+	uint16_t dport;
+	uint8_t proto;
+	uint8_t start;
+	uint8_t end;
+	uint8_t pattern_len;
+	uint8_t pattern[16];
+};
+
 #endif

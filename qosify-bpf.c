@@ -14,9 +14,12 @@
 #include <uapi/linux/filter.h>
 #include <uapi/linux/pkt_cls.h>
 #include <linux/ip.h>
+#include <linux/bpf.h>
 #include <net/ipv6.h>
 #include <bpf/bpf_helpers.h>
+#include <bpf/bpf_core_read.h>
 #include <bpf/bpf_endian.h>
+#include <bpf/bpf_tracing.h>
 #include "bpf_skb_utils.h"
 #include "qosify-bpf.h"
 #include "jhash.h"
@@ -36,6 +39,8 @@
 	bpf_trace_printk(____fmt, sizeof(____fmt),		\
 			 ##__VA_ARGS__);			\
 })
+
+long (* const bpf_loop)(u32 nr_loops, void *callback_fn, void *callback_ctx, u64 flags) __ksym;
 
 const volatile static uint32_t module_flags = 0;
 
@@ -160,6 +165,14 @@ struct {
 	__type(value, struct qosify_traffic_stats_val);
 	__uint(max_entries, DPI_MAX_NUM);
 } dpi_stats_map SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(pinning, 1);
+	__type(key, __u32);
+	__type(value, struct qosify_dpi_match_pattern);
+	__uint(max_entries, DPI_MAX_NUM);
+} dpi_match_map SEC(".maps");
 
 static struct qosify_config *get_config(void)
 {
@@ -478,28 +491,75 @@ rate_estimator(struct qosify_traffic_stats_val *val, __u32 est_slot, __u32 len, 
 	val->stats[ingress].total_packets++;
 }
 
-static  __u16
-dpi_engine_match(__u8 proto, __u16 dport, const __u8 *payload, __u32 payload_len, bool ingress)
+static __always_inline int
+dpi_match_scan(const __u8 *payload, const __u8 *pattern, __u32 pattern_len, __u32 payload_len)
 {
-	__u16 dpi_id = 0;
-
-	if (proto == IPPROTO_TCP) {
-		if (dport == 80) {
-			if (payload_len >= 4 && payload[0] == 'G' && payload[1] == 'E' &&
-			    payload[2] == 'T' && payload[3] == ' ') {
-				dpi_id = 1;
-			}
+	__u32 i, j;
+#if 0
+	for (i = 0; i < payload_len-pattern_len; i++) {
+		for (j = 0; j < pattern_len; j++) {
+			if (payload[i + j] != pattern[j])
+				break;
 		}
+		if (j == pattern_len)
+			return 0;
+	}
+#endif
+	return 1;
+}
 
-	} else if (proto == IPPROTO_UDP) {
-		if (dport == 53) {
-			if (payload_len >= 2 && payload[0] == 0x00 && payload[1] == 0x01) {
-				dpi_id = 2;
-			}
-		}
+struct dpi_match_ctx {
+	__u8 proto;
+	__u16 dport;
+	__u8 *payload;
+	__u32 payload_len;
+	bool ingress;
+	__u16 dpi_id;
+};
+
+static long 
+dpi_match_iterator_cb(__u32 index, void *ctx)
+{
+	struct qosify_dpi_match_pattern *pattern = bpf_map_lookup_elem(&dpi_match_map, &index);
+	struct dpi_match_ctx *match_ctx = (struct dpi_match_ctx *)ctx;
+	if (!pattern) {
+		bpf_printk("dpi_match_iterator_cb: end of pattern \n");
+		return 1; // stop the loop
 	}
 
-	return dpi_id;
+	
+	if (pattern->proto != match_ctx->proto || (!pattern->dport && pattern->dport != match_ctx->dport))
+		return 0;
+	
+	if ((!pattern->start && pattern->start >= match_ctx->payload_len)||
+		(!pattern->end && pattern->end > match_ctx->payload_len) ||
+		pattern->pattern_len > match_ctx->payload_len)
+		return 0;
+
+	if (dpi_match_scan(match_ctx->payload + pattern->start,
+		pattern->pattern, pattern->pattern_len,
+		pattern->end? pattern->end : match_ctx->payload_len ) == 0) {
+		match_ctx->dpi_id = pattern->dpi_id;
+		bpf_printk("dpi_match_iterator_cb: match found %d \n", pattern->dpi_id);
+		return 1; // stop the loop
+	}
+	return 0;
+}
+
+static  __u16
+dpi_engine_match(__u8 proto, __u16 dport, __u8 *payload, __u32 payload_len, bool ingress)
+{
+	struct dpi_match_ctx ctx;
+	__builtin_memset(&ctx, 0, sizeof(ctx));
+	ctx.proto = proto;
+	ctx.dport = dport;
+	ctx.payload = payload;
+	ctx.payload_len = payload_len;
+	ctx.ingress = ingress;
+
+	bpf_loop(DPI_MAX_NUM, dpi_match_iterator_cb, &ctx, 0);
+
+	return 0;
 }
 
 static __always_inline __u8
@@ -522,7 +582,6 @@ dpi4_engine(struct iphdr *iph, struct skb_parser_info *info, bool ingress, __u32
 	__u32 payload_len = 0;
 	__u32 key = 0;
 	__u8 dpi_max_check = 0;
-	struct qosify_conn_stats new_stats;
 
 	__builtin_memset(&keys, 0, sizeof(keys));
 	keys.proto = iph->protocol;
@@ -555,6 +614,7 @@ dpi4_engine(struct iphdr *iph, struct skb_parser_info *info, bool ingress, __u32
 			return;
 		payload_len = info->skb->len - info->offset;
 		dpi_max_check = 3;
+		return;
 	} else {
 		return;
 	}
@@ -588,6 +648,7 @@ dpi4_engine(struct iphdr *iph, struct skb_parser_info *info, bool ingress, __u32
 			}
 		}
 	} else {
+		struct qosify_conn_stats new_stats;
 		__builtin_memset(&new_stats, 0, sizeof(new_stats));
 		new_stats.val.est_slot = now;
 		new_stats.val.stats[ingress].cur_s_bytes = info->skb->len;
