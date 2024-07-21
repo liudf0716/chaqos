@@ -57,6 +57,10 @@ static const struct {
 	[CL_MAP_IPV6_STATS] = { "ipv6_stats_map", "ipv6_stats" },
 	[CL_MAP_IPV4_MASK] = { "ipv4_mask_map", "ipv4_mask" },
 	[CL_MAP_IPV6_MASK] = { "ipv6_mask_map", "ipv6_mask" },
+	[CL_MAP_TABLE_V4] = { "flow_table_v4_map", "table_v4" },
+	[CL_MAP_TABLE_V6] = { "flow_table_v6_map", "table_v6" },
+	[CL_MAP_DPI_MATCH] = { "dpi_match_map", "dpi_match" },
+	[CL_MAP_DPI_STATS] = { "dpi_stats_map", "dpi_stats" },
 	[CL_MAP_DNS] = { "dns", "dns" },
 };
 
@@ -612,7 +616,8 @@ int qosify_map_load_file(const char *file)
 	return __qosify_map_load_file(file);
 }
 
-static void qosify_map_reset_file_entries(void)
+static void 
+qosify_map_reset_file_entries(void)
 {
 	struct qosify_map_entry *e;
 
@@ -662,7 +667,8 @@ void qosify_map_reload(void)
 	qosify_map_set_dscp_default(CL_MAP_UDP_PORTS, 0xff);
 }
 
-static void qosify_map_free_entry(struct qosify_map_entry *e)
+static void 
+qosify_map_free_entry(struct qosify_map_entry *e)
 {
 	int fd = qosify_map_fds[e->data.id];
 
@@ -999,6 +1005,149 @@ void qosify_map_show_ip6_stats(struct blob_buf *b)
 	}
 	blobmsg_close_array(b, a);
 }
+
+void qosify_map_show_table_v4(struct blob_buf *b)
+{
+	struct qosify_traffic_stats_val val;
+	struct qosify_flowv4_keys key, next_key;
+	int fd = qosify_map_fds[CL_MAP_TABLE_V4];
+	void *a;
+
+	memset(&key, 0, sizeof(key));
+	memset(&next_key, 0, sizeof(next_key));
+	memset(&val, 0, sizeof(val));
+
+	a = blobmsg_open_array(b, "table_v4");
+	while (bpf_map_get_next_key(fd, &key, &next_key) == 0) {
+		if (bpf_map_lookup_elem(fd, &next_key, &val) < 0)
+			break;
+
+		void *c = blobmsg_open_table(b, NULL);
+		blobmsg_add_string(b, "src_ip", inet_ntoa(*(struct in_addr *)&next_key.src_ip));
+		blobmsg_add_string(b, "dst_ip", inet_ntoa(*(struct in_addr *)&next_key.dst_ip));
+		blobmsg_add_u16(b, "src_port", ntohs(next_key.src_port));
+		blobmsg_add_u16(b, "dst_port", ntohs(next_key.dst_port));
+		blobmsg_add_u8(b, "proto", next_key.proto);
+		// add stats
+		for (int i = 0; i < DIRECTION_MAX; i++) {
+			blobmsg_add_u32(b, dir_rate_str[i], calc_rate_estimator(&val, i));
+			blobmsg_add_u64(b, dir_bytes_str[i], val.stats[i].total_bytes);
+			blobmsg_add_u64(b, dir_packets_str[i], val.stats[i].total_packets);
+		}
+		blobmsg_close_table(b, c);
+		key = next_key;
+	}
+	blobmsg_close_array(b, a);
+}
+
+void qosify_map_show_table_v6(struct blob_buf *b)
+{
+	struct qosify_traffic_stats_val val;
+	struct qosify_flowv6_keys key, next_key;
+	int fd = qosify_map_fds[CL_MAP_TABLE_V6];
+	void *a;
+
+	memset(&key, 0, sizeof(key));
+	memset(&next_key, 0, sizeof(next_key));
+	memset(&val, 0, sizeof(val));
+
+	a = blobmsg_open_array(b, "table_v6");
+	while (bpf_map_get_next_key(fd, &key, &next_key) == 0) {
+		if (bpf_map_lookup_elem(fd, &next_key, &val) < 0)
+			break;
+
+		void *c = blobmsg_open_table(b, NULL);
+		char buf[INET6_ADDRSTRLEN] = {0};
+		inet_ntop(AF_INET6, &next_key.src_ip, buf, sizeof(buf));
+		blobmsg_add_string(b, "src_ip", buf);
+		inet_ntop(AF_INET6, &next_key.dst_ip, buf, sizeof(buf));
+		blobmsg_add_string(b, "dst_ip", buf);
+		blobmsg_add_u16(b, "src_port", ntohs(next_key.src_port));
+		blobmsg_add_u16(b, "dst_port", ntohs(next_key.dst_port));
+		blobmsg_add_u8(b, "proto", next_key.proto);
+		// add stats
+		for (int i = 0; i < DIRECTION_MAX; i++) {
+			blobmsg_add_u32(b, dir_rate_str[i], calc_rate_estimator(&val, i));
+			blobmsg_add_u64(b, dir_bytes_str[i], val.stats[i].total_bytes);
+			blobmsg_add_u64(b, dir_packets_str[i], val.stats[i].total_packets);
+		}
+		blobmsg_close_table(b, c);
+		memcpy(&key, &next_key, sizeof(key));
+	}
+	blobmsg_close_array(b, a);
+}
+
+void qosify_map_show_dpi_stats(struct blob_buf *b)
+{
+	struct qosify_traffic_stats_val val;
+	uint32_t key = 0;
+	uint32_t next_key;
+	int fd = qosify_map_fds[CL_MAP_DPI_STATS];
+	void *a;
+
+	a = blobmsg_open_array(b, "dpi_stats");
+	while (bpf_map_get_next_key(fd, &key, &next_key) == 0) {
+		if (bpf_map_lookup_elem(fd, &next_key, &val) < 0)
+			break;
+
+		void *c = blobmsg_open_table(b, NULL);
+		blobmsg_add_u32(b, "dpi_id", next_key);
+		// add stats
+		for (int i = 0; i < DIRECTION_MAX; i++) {
+			blobmsg_add_u32(b, dir_rate_str[i], calc_rate_estimator(&val, i));
+			blobmsg_add_u64(b, dir_bytes_str[i], val.stats[i].total_bytes);
+			blobmsg_add_u64(b, dir_packets_str[i], val.stats[i].total_packets);
+		}
+		blobmsg_close_table(b, c);
+		key = next_key;
+	}
+	blobmsg_close_array(b, a);
+}
+
+void qosify_map_show_dpi_match(struct blob_buf *b)
+{
+	struct qosify_dpi_match_pattern dpi_match;
+	uint32_t key;
+	int fd = qosify_map_fds[CL_MAP_DPI_MATCH];
+	void *a;
+
+	a = blobmsg_open_array(b, "dpi_match");
+	for (key = 0; key < DPI_MAX_NUM; key++) {
+		if (bpf_map_lookup_elem(fd, &key, &dpi_match) < 0)
+			break;
+
+		void *c = blobmsg_open_table(b, NULL);
+		blobmsg_add_u32(b, "index", key);
+		blobmsg_add_u16(b, "dpi_id", dpi_match.dpi_id);
+		blobmsg_add_u16(b, "dport", ntohs(dpi_match.dport));
+		blobmsg_add_u8(b, "proto", dpi_match.proto);
+		blobmsg_add_u8(b, "start", dpi_match.start);
+		blobmsg_add_u8(b, "end", dpi_match.end);
+		blobmsg_add_u8(b, "pattern_len", dpi_match.pattern_len);
+		blobmsg_add_string(b, "pattern", (char *)dpi_match.pattern);
+		blobmsg_close_table(b, c);
+	}
+	blobmsg_close_array(b, a);
+}
+
+int qosify_map_add_dpi_match(struct qosify_dpi_match_pattern *dpi_match)
+{
+	int fd = qosify_map_fds[CL_MAP_DPI_MATCH];
+	uint32_t key;
+	struct qosify_dpi_match_pattern val;
+	int ret;
+
+	for ( key = 0; key <  DPI_MAX_NUM; key++) {
+		ret = bpf_map_lookup_elem(fd, &key, &val);
+		if (ret < 0)
+			break;
+	}
+	if (key == DPI_MAX_NUM)
+		return -1; // no space
+
+	return bpf_map_update_elem(fd, &key, dpi_match, BPF_ANY);
+}
+
 
 void qosify_map_dump(struct blob_buf *b)
 {

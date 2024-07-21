@@ -39,6 +39,10 @@ enum qosify_map_id {
 	CL_MAP_IPV6_STATS,
 	CL_MAP_IPV4_MASK,
 	CL_MAP_IPV6_MASK,
+	CL_MAP_TABLE_V4,
+	CL_MAP_TABLE_V6,
+	CL_MAP_DPI_MATCH,
+	CL_MAP_DPI_STATS,
 	CL_MAP_DNS,
 	__CL_MAP_MAX,
 };
@@ -103,8 +107,13 @@ int qosify_map_lookup_dns_entry(char *host, bool cname, uint8_t *dscp, uint32_t 
 int qosify_map_add_dns_host(char *host, const char *addr, const char *type, int ttl);
 int qosify_map_set_ipv4_mask(char *ip4, uint32_t prefix);
 int qosify_map_set_ipv6_mask(char *ip6, uint32_t prefix);
+int qosify_map_add_dpi_match(struct qosify_dpi_match_pattern *dpi_match);
 void qosify_map_show_ip4_stats(struct blob_buf *b);
 void qosify_map_show_ip6_stats(struct blob_buf *b);
+void qosify_map_show_table_v4(struct blob_buf *b);
+void qosify_map_show_table_v6(struct blob_buf *b);
+void qosify_map_show_dpi_stats(struct blob_buf *b);
+void qosify_map_show_dpi_match(struct blob_buf *b);
 void qosify_net_mask_config_update(struct blob_attr *attr);
 void qosify_map_clear_list(enum qosify_map_id id);
 int map_parse_flow_config(struct qosify_flow_config *cfg, struct blob_attr *attr,

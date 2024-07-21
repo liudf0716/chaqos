@@ -29,6 +29,7 @@
 #define MIN_TCP_PAYLOAD_LEN 20
 #define MIN_UDP_PAYLOAD_LEN 8
 #define MAX_PATTERN_LEN 32
+#define DPI_MAX_NUM		1024
 
 enum {
 	EGRESS,
@@ -129,6 +130,15 @@ struct qosify_dpi_match_pattern {
 	uint8_t end;
 	uint8_t pattern_len;
 	uint8_t pattern[MAX_PATTERN_LEN];
+};
+
+struct dpi_match_ctx {
+	__u8 proto;
+	__u16 dport;
+	__u8 *payload;
+	__u32 payload_len;
+	bool ingress;
+	__u16 dpi_id;
 };
 
 #endif

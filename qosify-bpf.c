@@ -31,7 +31,6 @@
 #define FLOW_BULK_TIMEOUT	5
 
 #define EWMA_SHIFT		12
-#define DPI_MAX_NUM		1024
 
 #define bpf_printk(fmt, ...)					\
 ({								\
@@ -148,7 +147,7 @@ struct {
 	__type(key, struct qosify_flowv4_keys);
 	__type(value, struct qosify_conn_stats);
 	__uint(max_entries, 100000);
-} flow_table_v4 SEC(".maps");
+} flow_table_v4_map SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
@@ -156,7 +155,7 @@ struct {
 	__type(key, struct qosify_flowv6_keys);
 	__type(value, struct qosify_conn_stats);
 	__uint(max_entries, 100000);
-} flow_table_v6 SEC(".maps");
+} flow_table_v6_map SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
@@ -510,15 +509,6 @@ dpi_match_scan(const __u8 *payload, const __u8 *pattern, __u32 pattern_len, __u3
 	return 1;
 }
 
-struct dpi_match_ctx {
-	__u8 proto;
-	__u16 dport;
-	__u8 *payload;
-	__u32 payload_len;
-	bool ingress;
-	__u16 dpi_id;
-};
-
 static long 
 dpi_match_iterator_cb(__u32 index, void *ctx)
 {
@@ -596,8 +586,8 @@ dpi4_engine(struct iphdr *iph, struct skb_parser_info *info, bool ingress, __u32
 		keys.src_port = ingress? tcph->source : tcph->dest;
 		keys.dst_port = ingress? tcph->dest : tcph->source;
 		if (check_tcp_finish(tcph)) {
-			if (bpf_map_lookup_elem(&flow_table_v4, &keys))
-				bpf_map_delete_elem(&flow_table_v4, &keys);
+			if (bpf_map_lookup_elem(&flow_table_v4_map, &keys))
+				bpf_map_delete_elem(&flow_table_v4_map, &keys);
 			return;
 		}
 		payload = skb_info_ptr(info, MIN_TCP_PAYLOAD_LEN);
@@ -625,7 +615,7 @@ dpi4_engine(struct iphdr *iph, struct skb_parser_info *info, bool ingress, __u32
 		return;
 	}
 
-	stats = bpf_map_lookup_elem(&flow_table_v4, &keys);
+	stats = bpf_map_lookup_elem(&flow_table_v4_map, &keys);
 	if (stats) {
 		if (!stats->dpi_id && stats->dpi_pkt_num >= dpi_max_check){
 			stats->dpi_id = DPI_MAX_NUM;
@@ -634,7 +624,7 @@ dpi4_engine(struct iphdr *iph, struct skb_parser_info *info, bool ingress, __u32
 			stats->dpi_pkt_num++;
 		}
 		rate_estimator(&stats->val, now, info->skb->len, ingress);
-		bpf_map_update_elem(&flow_table_v4, &keys, stats, BPF_ANY);
+		bpf_map_update_elem(&flow_table_v4_map, &keys, stats, BPF_ANY);
 		if (stats->dpi_id) {
 			dpi_val = bpf_map_lookup_elem(&dpi_stats_map, &stats->dpi_id);
 			if (dpi_val) {
@@ -656,7 +646,7 @@ dpi4_engine(struct iphdr *iph, struct skb_parser_info *info, bool ingress, __u32
 		new_stats.val.stats[ingress].cur_s_bytes = info->skb->len;
 		new_stats.val.stats[ingress].total_bytes = info->skb->len;
 		new_stats.val.stats[ingress].total_packets = 1;
-		bpf_map_update_elem(&flow_table_v4, &keys, &new_stats, BPF_ANY);
+		bpf_map_update_elem(&flow_table_v4_map, &keys, &new_stats, BPF_ANY);
 	}
 }
 

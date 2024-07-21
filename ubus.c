@@ -388,6 +388,139 @@ qosify_ubus_show_ip6_stats(struct ubus_context *ctx, struct ubus_object *obj,
 	return 0;
 }
 
+static int
+qosify_ubus_show_table_v4(struct ubus_context *ctx, struct ubus_object *obj,
+			  struct ubus_request_data *req, const char *method,
+			  struct blob_attr *msg)
+{
+	blob_buf_init(&b, 0);
+	qosify_map_show_table_v4(&b);
+	ubus_send_reply(ctx, req, b.head);
+	blob_buf_free(&b);
+
+	return 0;
+}
+
+static int
+qosify_ubus_show_table_v6(struct ubus_context *ctx, struct ubus_object *obj,
+			  struct ubus_request_data *req, const char *method,
+			  struct blob_attr *msg)
+{
+	blob_buf_init(&b, 0);
+	qosify_map_show_table_v6(&b);
+	ubus_send_reply(ctx, req, b.head);
+	blob_buf_free(&b);
+
+	return 0;
+}
+
+static int
+qosify_ubus_show_dpi_stats(struct ubus_context *ctx, struct ubus_object *obj,
+			   struct ubus_request_data *req, const char *method,
+			   struct blob_attr *msg)
+{
+	blob_buf_init(&b, 0);
+	qosify_map_show_dpi_stats(&b);
+	ubus_send_reply(ctx, req, b.head);
+	blob_buf_free(&b);
+
+	return 0;
+}
+
+static int
+qosify_ubus_show_dpi_match(struct ubus_context *ctx, struct ubus_object *obj,
+			   struct ubus_request_data *req, const char *method,
+			   struct blob_attr *msg)
+{
+	blob_buf_init(&b, 0);
+	qosify_map_show_dpi_match(&b);
+	ubus_send_reply(ctx, req, b.head);
+	blob_buf_free(&b);
+
+	return 0;
+}
+
+enum {
+	CL_DPI_PATTERN_DPI_ID,
+	CL_DPI_PATTERN_DPORT,
+	CL_DPI_PATTERN_PROTO,
+	CL_DPI_PATTERN_START,
+	CL_DPI_PATTERN_END,
+	CLI_DPI_PATTERN_PATTERN_LEN,
+	CL_DPI_PATTERN_PATTERN,
+	__CL_DPI_PATTERN_MAX
+};
+
+static const struct blobmsg_policy qosify_dpi_match_policy[] = {
+	[CL_DPI_PATTERN_DPI_ID] = { "dpi_id", BLOBMSG_TYPE_INT16 },
+	[CL_DPI_PATTERN_DPORT] = { "dport", BLOBMSG_TYPE_INT16 },
+	[CL_DPI_PATTERN_PROTO] = { "proto", BLOBMSG_TYPE_INT8 },
+	[CL_DPI_PATTERN_START] = { "start", BLOBMSG_TYPE_INT8 },
+	[CL_DPI_PATTERN_END] = { "end", BLOBMSG_TYPE_INT8 },
+	[CLI_DPI_PATTERN_PATTERN_LEN] = { "pattern_len", BLOBMSG_TYPE_INT8 },
+	[CL_DPI_PATTERN_PATTERN] = { "pattern", BLOBMSG_TYPE_STRING },
+};
+
+static int
+qosify_ubus_add_dpi_match(struct ubus_context *ctx, struct ubus_object *obj,
+			  struct ubus_request_data *req, const char *method,
+			  struct blob_attr *msg)
+{
+	struct blob_attr *tb[__CL_DPI_PATTERN_MAX];
+	struct blob_attr *cur;
+	struct qosify_dpi_match_pattern pattern = {};
+	int ret;
+
+	blobmsg_parse(qosify_dpi_match_policy, __CL_DPI_PATTERN_MAX, tb,
+		      blobmsg_data(msg), blobmsg_len(msg));
+
+	if (!tb[CL_DPI_PATTERN_DPI_ID] || !tb[CL_DPI_PATTERN_DPORT] ||
+	    !tb[CL_DPI_PATTERN_PROTO] || !tb[CL_DPI_PATTERN_START] ||
+	    !tb[CL_DPI_PATTERN_END] || !tb[CLI_DPI_PATTERN_PATTERN_LEN] ||
+	    !tb[CL_DPI_PATTERN_PATTERN])
+		return UBUS_STATUS_INVALID_ARGUMENT;
+
+	pattern.dpi_id = blobmsg_get_u16(tb[CL_DPI_PATTERN_DPI_ID]);
+	pattern.dport = blobmsg_get_u16(tb[CL_DPI_PATTERN_DPORT]);
+	pattern.dport = htons(pattern.dport);
+	pattern.proto = blobmsg_get_u8(tb[CL_DPI_PATTERN_PROTO]);
+	pattern.start = blobmsg_get_u8(tb[CL_DPI_PATTERN_START]);
+	pattern.end = blobmsg_get_u8(tb[CL_DPI_PATTERN_END]);
+	pattern.pattern_len = blobmsg_get_u8(tb[CLI_DPI_PATTERN_PATTERN_LEN]);
+	if (pattern.pattern_len > MAX_PATTERN_LEN)
+		return UBUS_STATUS_INVALID_ARGUMENT;
+
+	cur = tb[CL_DPI_PATTERN_PATTERN];
+	if (blobmsg_data_len(cur) != pattern.pattern_len)
+		return UBUS_STATUS_INVALID_ARGUMENT;
+
+	memcpy(pattern.pattern, blobmsg_data(cur), pattern.pattern_len);
+
+	ret = qosify_map_add_dpi_match(&pattern);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
+static int
+qosify_ubus_show_all_stats(struct ubus_context *ctx, struct ubus_object *obj,
+			   struct ubus_request_data *req, const char *method,
+			   struct blob_attr *msg)
+{
+	blob_buf_init(&b, 0);
+	qosify_map_show_ip4_stats(&b);
+	qosify_map_show_ip6_stats(&b);
+	qosify_map_show_table_v4(&b);
+	qosify_map_show_table_v6(&b);
+	qosify_map_show_dpi_stats(&b);
+	qosify_map_show_dpi_match(&b);
+	ubus_send_reply(ctx, req, b.head);
+	blob_buf_free(&b);
+
+	return 0;
+}
+
 static const struct ubus_method qosify_methods[] = {
 	UBUS_METHOD_NOARG("reload", qosify_ubus_reload),
 	UBUS_METHOD("add", qosify_ubus_add, qosify_add_policy),
@@ -402,6 +535,12 @@ static const struct ubus_method qosify_methods[] = {
 	UBUS_METHOD("mask", qosify_ubus_add_mask, qosify_mask_policy),
 	UBUS_METHOD_NOARG("show_ip4_stats", qosify_ubus_show_ip4_stats),
 	UBUS_METHOD_NOARG("show_ip6_stats", qosify_ubus_show_ip6_stats),
+	UBUS_METHOD_NOARG("show_table4", qosify_ubus_show_table_v4),
+	UBUS_METHOD_NOARG("show_table6", qosify_ubus_show_table_v6),
+	UBUS_METHOD_NOARG("show_dpi_stats", qosify_ubus_show_dpi_stats),
+	UBUS_METHOD_NOARG("show_dpi_match", qosify_ubus_show_dpi_match),
+	UBUS_METHOD("dpi_match", qosify_ubus_add_dpi_match, qosify_dpi_match_policy),
+	UBUS_METHOD_NOARG("show_all_stats", qosify_ubus_show_all_stats),
 };
 
 static struct ubus_object_type qosify_object_type =
