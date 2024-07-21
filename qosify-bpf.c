@@ -432,7 +432,7 @@ check_flow(struct qosify_flow_config *config, struct __sk_buff *skb,
 	hash = bpf_get_hash_recalc(skb);
 	flow = bpf_map_lookup_elem(&flow_map, &hash);
 	if (!flow) {
-		memset(&flow_data, 0, sizeof(flow_data));
+		__builtin_memset(&flow_data, 0, sizeof(flow_data));
 		bpf_map_update_elem(&flow_map, &hash, &flow_data, BPF_ANY);
 		flow = bpf_map_lookup_elem(&flow_map, &hash);
 		if (!flow)
@@ -494,17 +494,19 @@ rate_estimator(struct qosify_traffic_stats_val *val, __u32 est_slot, __u32 len, 
 static __always_inline int
 dpi_match_scan(const __u8 *payload, const __u8 *pattern, __u32 pattern_len, __u32 payload_len)
 {
-	__u32 i, j;
-#if 0
+#define MAX_SCAN_LEN 300
+	__u8 i;
+	__u32 len;
+	if (pattern_len > payload_len)
+		return 1;
+	len = payload_len - pattern_len;
+	if (len > MAX_SCAN_LEN)
+		len = MAX_SCAN_LEN;
 	for (i = 0; i < payload_len-pattern_len; i++) {
-		for (j = 0; j < pattern_len; j++) {
-			if (payload[i + j] != pattern[j])
-				break;
-		}
-		if (j == pattern_len)
+		if (memcmp(payload + i, pattern, pattern_len) == 0)
 			return 0;
 	}
-#endif
+
 	return 1;
 }
 
@@ -735,10 +737,10 @@ parse_ipv6(struct qosify_config *config, struct skb_parser_info *info,
 		return NULL;
 
 	if (ingress) {
-		memcpy(&addr, &iph->saddr, sizeof(addr));
+		__builtin_memcpy(&addr, &iph->saddr, sizeof(addr));
 		key = &iph->saddr;
 	} else {
-		memcpy(&addr, &iph->daddr, sizeof(addr));
+		__builtin_memcpy(&addr, &iph->daddr, sizeof(addr));
 		key = &iph->daddr;
 	}
 

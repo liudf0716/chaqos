@@ -28,6 +28,7 @@
 
 #define MIN_TCP_PAYLOAD_LEN 20
 #define MIN_UDP_PAYLOAD_LEN 8
+#define MAX_PATTERN_LEN 32
 
 enum {
 	EGRESS,
@@ -127,7 +128,7 @@ struct qosify_dpi_match_pattern {
 	uint8_t start;
 	uint8_t end;
 	uint8_t pattern_len;
-	uint8_t pattern[16];
+	uint8_t pattern[MAX_PATTERN_LEN];
 };
 
 #endif
