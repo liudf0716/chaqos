@@ -452,12 +452,12 @@ enum {
 };
 
 static const struct blobmsg_policy qosify_dpi_match_policy[] = {
-	[CL_DPI_PATTERN_DPI_ID] = { "dpi_id", BLOBMSG_TYPE_INT16 },
-	[CL_DPI_PATTERN_DPORT] = { "dport", BLOBMSG_TYPE_INT16 },
-	[CL_DPI_PATTERN_PROTO] = { "proto", BLOBMSG_TYPE_INT8 },
-	[CL_DPI_PATTERN_START] = { "start", BLOBMSG_TYPE_INT8 },
-	[CL_DPI_PATTERN_END] = { "end", BLOBMSG_TYPE_INT8 },
-	[CLI_DPI_PATTERN_PATTERN_LEN] = { "pattern_len", BLOBMSG_TYPE_INT8 },
+	[CL_DPI_PATTERN_DPI_ID] = { "dpi_id", BLOBMSG_TYPE_INT32 },
+	[CL_DPI_PATTERN_DPORT] = { "dport", BLOBMSG_TYPE_INT32 },
+	[CL_DPI_PATTERN_PROTO] = { "proto", BLOBMSG_TYPE_INT32 },
+	[CL_DPI_PATTERN_START] = { "start", BLOBMSG_TYPE_INT32 },
+	[CL_DPI_PATTERN_END] = { "end", BLOBMSG_TYPE_INT32 },
+	[CLI_DPI_PATTERN_PATTERN_LEN] = { "pattern_len", BLOBMSG_TYPE_INT32 },
 	[CL_DPI_PATTERN_PATTERN] = { "pattern", BLOBMSG_TYPE_STRING },
 };
 
@@ -477,28 +477,33 @@ qosify_ubus_add_dpi_match(struct ubus_context *ctx, struct ubus_object *obj,
 	if (!tb[CL_DPI_PATTERN_DPI_ID] || !tb[CL_DPI_PATTERN_DPORT] ||
 	    !tb[CL_DPI_PATTERN_PROTO] || !tb[CL_DPI_PATTERN_START] ||
 	    !tb[CL_DPI_PATTERN_END] || !tb[CLI_DPI_PATTERN_PATTERN_LEN] ||
-	    !tb[CL_DPI_PATTERN_PATTERN])
-		return UBUS_STATUS_INVALID_ARGUMENT;
+	    !tb[CL_DPI_PATTERN_PATTERN]) {
+		return UBUS_STATUS_NO_DATA;
+	}
 
-	pattern.dpi_id = blobmsg_get_u16(tb[CL_DPI_PATTERN_DPI_ID]);
-	pattern.dport = blobmsg_get_u16(tb[CL_DPI_PATTERN_DPORT]);
+	pattern.dpi_id = blobmsg_get_u32(tb[CL_DPI_PATTERN_DPI_ID]);
+	pattern.dport = blobmsg_get_u32(tb[CL_DPI_PATTERN_DPORT]);
 	pattern.dport = htons(pattern.dport);
-	pattern.proto = blobmsg_get_u8(tb[CL_DPI_PATTERN_PROTO]);
-	pattern.start = blobmsg_get_u8(tb[CL_DPI_PATTERN_START]);
-	pattern.end = blobmsg_get_u8(tb[CL_DPI_PATTERN_END]);
-	pattern.pattern_len = blobmsg_get_u8(tb[CLI_DPI_PATTERN_PATTERN_LEN]);
-	if (pattern.pattern_len > MAX_PATTERN_LEN)
-		return UBUS_STATUS_INVALID_ARGUMENT;
+	pattern.proto = blobmsg_get_u32(tb[CL_DPI_PATTERN_PROTO]);
+	pattern.start = blobmsg_get_u32(tb[CL_DPI_PATTERN_START]);
+	pattern.end = blobmsg_get_u32(tb[CL_DPI_PATTERN_END]);
+	pattern.pattern_len = blobmsg_get_u32(tb[CLI_DPI_PATTERN_PATTERN_LEN]);
 
 	cur = tb[CL_DPI_PATTERN_PATTERN];
-	if (blobmsg_data_len(cur) != pattern.pattern_len)
-		return UBUS_STATUS_INVALID_ARGUMENT;
+	const char *pattern_str = blobmsg_get_string(cur);
+	if (pattern.pattern_len != strlen(pattern_str))
+		pattern.pattern_len = strlen(pattern_str);
 
-	memcpy(pattern.pattern, blobmsg_data(cur), pattern.pattern_len);
+	if (pattern.pattern_len > MAX_PATTERN_LEN) {
+		return UBUS_STATUS_INVALID_ARGUMENT;
+	}
+
+	memcpy(pattern.pattern, pattern_str, pattern.pattern_len);
 
 	ret = qosify_map_add_dpi_match(&pattern);
-	if (ret)
-		return ret;
+	if (ret) {
+		return UBUS_STATUS_UNKNOWN_ERROR;
+	}
 
 	return 0;
 }

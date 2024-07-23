@@ -1142,8 +1142,11 @@ int qosify_map_add_dpi_match(struct qosify_dpi_match_pattern *dpi_match)
 	for ( key = 0; key <  DPI_MAX_NUM; key++) {
 		ret = bpf_map_lookup_elem(fd, &key, &val);
 		if (ret < 0)
+			return -2; // find error
+		if (val.dpi_id == 0)
 			break;
 	}
+	
 	if (key == DPI_MAX_NUM)
 		return -1; // no space
 
