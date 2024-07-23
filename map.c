@@ -1025,9 +1025,9 @@ void qosify_map_show_table_v4(struct blob_buf *b)
 		void *c = blobmsg_open_table(b, NULL);
 		blobmsg_add_string(b, "src_ip", inet_ntoa(*(struct in_addr *)&next_key.src_ip));
 		blobmsg_add_string(b, "dst_ip", inet_ntoa(*(struct in_addr *)&next_key.dst_ip));
-		blobmsg_add_u16(b, "src_port", ntohs(next_key.src_port));
-		blobmsg_add_u16(b, "dst_port", ntohs(next_key.dst_port));
-		blobmsg_add_u8(b, "proto", next_key.proto);
+		blobmsg_add_u32(b, "src_port", ntohs(next_key.src_port));
+		blobmsg_add_u32(b, "dst_port", ntohs(next_key.dst_port));
+		blobmsg_add_u32(b, "proto", next_key.proto);
 		// add stats
 		for (int i = 0; i < DIRECTION_MAX; i++) {
 			blobmsg_add_u32(b, dir_rate_str[i], calc_rate_estimator(&val, i));
@@ -1062,9 +1062,9 @@ void qosify_map_show_table_v6(struct blob_buf *b)
 		blobmsg_add_string(b, "src_ip", buf);
 		inet_ntop(AF_INET6, &next_key.dst_ip, buf, sizeof(buf));
 		blobmsg_add_string(b, "dst_ip", buf);
-		blobmsg_add_u16(b, "src_port", ntohs(next_key.src_port));
-		blobmsg_add_u16(b, "dst_port", ntohs(next_key.dst_port));
-		blobmsg_add_u8(b, "proto", next_key.proto);
+		blobmsg_add_u32(b, "src_port", ntohs(next_key.src_port));
+		blobmsg_add_u32(b, "dst_port", ntohs(next_key.dst_port));
+		blobmsg_add_u32(b, "proto", next_key.proto);
 		// add stats
 		for (int i = 0; i < DIRECTION_MAX; i++) {
 			blobmsg_add_u32(b, dir_rate_str[i], calc_rate_estimator(&val, i));
@@ -1115,15 +1115,17 @@ void qosify_map_show_dpi_match(struct blob_buf *b)
 	for (key = 0; key < DPI_MAX_NUM; key++) {
 		if (bpf_map_lookup_elem(fd, &key, &dpi_match) < 0)
 			break;
+		if (dpi_match.dpi_id == 0)
+			break;
 
 		void *c = blobmsg_open_table(b, NULL);
 		blobmsg_add_u32(b, "index", key);
-		blobmsg_add_u16(b, "dpi_id", dpi_match.dpi_id);
-		blobmsg_add_u16(b, "dport", ntohs(dpi_match.dport));
-		blobmsg_add_u8(b, "proto", dpi_match.proto);
-		blobmsg_add_u8(b, "start", dpi_match.start);
-		blobmsg_add_u8(b, "end", dpi_match.end);
-		blobmsg_add_u8(b, "pattern_len", dpi_match.pattern_len);
+		blobmsg_add_u32(b, "dpi_id", dpi_match.dpi_id);
+		blobmsg_add_u32(b, "dport", ntohs(dpi_match.dport));
+		blobmsg_add_u32(b, "proto", dpi_match.proto);
+		blobmsg_add_u32(b, "start", dpi_match.start);
+		blobmsg_add_u32(b, "end", dpi_match.end);
+		blobmsg_add_u32(b, "pattern_len", dpi_match.pattern_len);
 		blobmsg_add_string(b, "pattern", (char *)dpi_match.pattern);
 		blobmsg_close_table(b, c);
 	}
