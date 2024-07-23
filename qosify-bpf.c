@@ -493,7 +493,7 @@ rate_estimator(struct qosify_traffic_stats_val *val, __u32 est_slot, __u32 len, 
 static __always_inline int
 dpi_match_scan(const __u8 *payload, const __u8 *pattern, __u32 pattern_len, __u32 payload_len)
 {
-#define MAX_SCAN_LEN 300
+#define MAX_SCAN_LEN 1000
 	__u8 i;
 	__u32 len;
 	if (pattern_len > payload_len)
