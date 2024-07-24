@@ -959,6 +959,7 @@ void qosify_map_show_ip4_stats(struct blob_buf *b)
 	uint32_t next_key;
 	int fd = qosify_map_fds[CL_MAP_IPV4_STATS];
 	void *a;
+	uint32_t count = 0;
 	
 	a = blobmsg_open_array(b, "ipv4_stats");
 	while (bpf_map_get_next_key(fd, &key, &next_key) == 0) {
@@ -974,8 +975,11 @@ void qosify_map_show_ip4_stats(struct blob_buf *b)
 		}
 		blobmsg_close_table(b, c);
 		key = next_key;
+		count++;
 	}
 	blobmsg_close_array(b, a);
+
+	blobmsg_add_u32(b, "ipv4_stats_count", count);
 }
 
 void qosify_map_show_ip6_stats(struct blob_buf *b)
@@ -985,6 +989,7 @@ void qosify_map_show_ip6_stats(struct blob_buf *b)
 	uint32_t next_key[4];
 	int fd = qosify_map_fds[CL_MAP_IPV6_STATS];
 	void *a;
+	uint32_t count = 0;
 
 	a = blobmsg_open_array(b, "ipv6_stats");
 	while (bpf_map_get_next_key(fd, key, next_key) == 0) {
@@ -1002,8 +1007,11 @@ void qosify_map_show_ip6_stats(struct blob_buf *b)
 		}
 		blobmsg_close_table(b, c);
 		memcpy(key, next_key, sizeof(key));
+		count++;
 	}
 	blobmsg_close_array(b, a);
+
+	blobmsg_add_u32(b, "ipv6_stats_count", count);
 }
 
 void qosify_map_show_table_v4(struct blob_buf *b)
@@ -1012,6 +1020,7 @@ void qosify_map_show_table_v4(struct blob_buf *b)
 	struct qosify_flowv4_keys key, next_key;
 	int fd = qosify_map_fds[CL_MAP_TABLE_V4];
 	void *a;
+	uint32_t count = 0;
 
 	memset(&key, 0, sizeof(key));
 	memset(&next_key, 0, sizeof(next_key));
@@ -1036,8 +1045,11 @@ void qosify_map_show_table_v4(struct blob_buf *b)
 		}
 		blobmsg_close_table(b, c);
 		key = next_key;
+		count++;
 	}
 	blobmsg_close_array(b, a);
+
+	blobmsg_add_u32(b, "table_v4_count", count);
 }
 
 void qosify_map_show_table_v6(struct blob_buf *b)
@@ -1046,6 +1058,7 @@ void qosify_map_show_table_v6(struct blob_buf *b)
 	struct qosify_flowv6_keys key, next_key;
 	int fd = qosify_map_fds[CL_MAP_TABLE_V6];
 	void *a;
+	uint32_t count = 0;
 
 	memset(&key, 0, sizeof(key));
 	memset(&next_key, 0, sizeof(next_key));
@@ -1073,8 +1086,11 @@ void qosify_map_show_table_v6(struct blob_buf *b)
 		}
 		blobmsg_close_table(b, c);
 		memcpy(&key, &next_key, sizeof(key));
+		count++;
 	}
 	blobmsg_close_array(b, a);
+
+	blobmsg_add_u32(b, "table_v6_count", count);
 }
 
 void qosify_map_show_dpi_stats(struct blob_buf *b)
@@ -1084,6 +1100,7 @@ void qosify_map_show_dpi_stats(struct blob_buf *b)
 	uint32_t next_key;
 	int fd = qosify_map_fds[CL_MAP_DPI_STATS];
 	void *a;
+	uint32_t count = 0;
 
 	a = blobmsg_open_array(b, "dpi_stats");
 	while (bpf_map_get_next_key(fd, &key, &next_key) == 0) {
@@ -1100,8 +1117,11 @@ void qosify_map_show_dpi_stats(struct blob_buf *b)
 		}
 		blobmsg_close_table(b, c);
 		key = next_key;
+		count++;
 	}
 	blobmsg_close_array(b, a);
+
+	blobmsg_add_u32(b, "dpi_count", count);
 }
 
 void qosify_map_show_dpi_match(struct blob_buf *b)
@@ -1110,6 +1130,7 @@ void qosify_map_show_dpi_match(struct blob_buf *b)
 	uint32_t key;
 	int fd = qosify_map_fds[CL_MAP_DPI_MATCH];
 	void *a;
+	uint32_t count = 0;
 
 	a = blobmsg_open_array(b, "dpi_match");
 	for (key = 0; key < DPI_MAX_NUM; key++) {
@@ -1128,8 +1149,11 @@ void qosify_map_show_dpi_match(struct blob_buf *b)
 		blobmsg_add_u32(b, "pattern_len", dpi_match.pattern_len);
 		blobmsg_add_string(b, "pattern", (char *)dpi_match.pattern);
 		blobmsg_close_table(b, c);
+		count++;
 	}
 	blobmsg_close_array(b, a);
+
+	blobmsg_add_u32(b, "dpi_match_count", count);
 }
 
 int qosify_map_add_dpi_match(struct qosify_dpi_match_pattern *dpi_match)
@@ -1146,7 +1170,7 @@ int qosify_map_add_dpi_match(struct qosify_dpi_match_pattern *dpi_match)
 		if (val.dpi_id == 0)
 			break;
 	}
-	
+
 	if (key == DPI_MAX_NUM)
 		return -1; // no space
 

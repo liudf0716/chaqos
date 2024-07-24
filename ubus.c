@@ -482,8 +482,7 @@ qosify_ubus_add_dpi_match(struct ubus_context *ctx, struct ubus_object *obj,
 	}
 
 	pattern.dpi_id = blobmsg_get_u32(tb[CL_DPI_PATTERN_DPI_ID]);
-	pattern.dport = blobmsg_get_u32(tb[CL_DPI_PATTERN_DPORT]);
-	pattern.dport = htons(pattern.dport);
+	pattern.dport = htons((uint16_t)blobmsg_get_u32(tb[CL_DPI_PATTERN_DPORT]));
 	pattern.proto = blobmsg_get_u32(tb[CL_DPI_PATTERN_PROTO]);
 	pattern.start = blobmsg_get_u32(tb[CL_DPI_PATTERN_START]);
 	pattern.end = blobmsg_get_u32(tb[CL_DPI_PATTERN_END]);
@@ -519,7 +518,6 @@ qosify_ubus_show_all_stats(struct ubus_context *ctx, struct ubus_object *obj,
 	qosify_map_show_table_v4(&b);
 	qosify_map_show_table_v6(&b);
 	qosify_map_show_dpi_stats(&b);
-	qosify_map_show_dpi_match(&b);
 	ubus_send_reply(ctx, req, b.head);
 	blob_buf_free(&b);
 
