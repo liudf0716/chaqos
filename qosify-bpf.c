@@ -32,13 +32,6 @@
 
 #define EWMA_SHIFT		12
 
-#define bpf_printk(fmt, ...)					\
-({								\
-	char ____fmt[] = fmt;					\
-	bpf_trace_printk(____fmt, sizeof(____fmt),		\
-			 ##__VA_ARGS__);			\
-})
-
 long (* const bpf_loop)(u32 nr_loops, void *callback_fn, void *callback_ctx, u64 flags) __ksym;
 
 const volatile static uint32_t module_flags = 0;
@@ -615,6 +608,7 @@ dpi4_engine(struct iphdr *iph, struct skb_parser_info *info, bool ingress, __u32
 		return;
 	}
 
+	bpf_printk("dpi4_engine: %d %d %d\n", keys.src_ip, ntohs(keys.dst_port), keys.proto);
 	stats = bpf_map_lookup_elem(&flow_table_v4_map, &keys);
 	if (stats) {
 		if (!stats->dpi_id && stats->dpi_pkt_num >= dpi_max_check){
@@ -683,6 +677,7 @@ parse_ipv4(struct qosify_config *config, struct skb_parser_info *info,
 	}
 
 	if (!mask) {
+		bpf_printk("no mask\n");
 		return bpf_map_lookup_elem(&ipv4_map, key);
 	}
 
@@ -795,8 +790,10 @@ int classify(struct __sk_buff *skb)
 	int type;
 
 	config = get_config();
-	if (!config)
+	if (!config) {
+		bpf_printk("no config\n");
 		return TC_ACT_UNSPEC;
+	}
 
 	skb_parse_init(&info, skb);
 	if (module_flags & QOSIFY_IP_ONLY) {
@@ -806,6 +803,7 @@ int classify(struct __sk_buff *skb)
 		skb_parse_vlan(&info);
 		type = info.proto;
 	} else {
+		bpf_printk("no eth\n");
 		return TC_ACT_UNSPEC;
 	}
 
@@ -814,8 +812,10 @@ int classify(struct __sk_buff *skb)
 		ip_val = parse_ipv4(config, &info, ingress, &dscp);
 	else if (type == bpf_htons(ETH_P_IPV6))
 		ip_val = parse_ipv6(config, &info, ingress, &dscp);
-	else
+	else {
+		bpf_printk("no ip\n");
 		return TC_ACT_UNSPEC;
+	}
 
 	if (ip_val) {
 		if (!ip_val->seen)
@@ -823,13 +823,15 @@ int classify(struct __sk_buff *skb)
 		dscp = ip_val->dscp;
 	}
 
-	if (dscp_lookup_class(&dscp, ingress, &class, true))
+	if (dscp_lookup_class(&dscp, ingress, &class, true)) {
 		return TC_ACT_UNSPEC;
+	}
 
 	if (class) {
 		if (check_flow(&class->config, skb, &dscp) &&
-		    dscp_lookup_class(&dscp, ingress, &class, false))
+		    dscp_lookup_class(&dscp, ingress, &class, false)) {
 			return TC_ACT_UNSPEC;
+		}
 	}
 
 	dscp &= GENMASK(5, 0);

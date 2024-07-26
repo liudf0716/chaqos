@@ -1016,7 +1016,8 @@ void qosify_map_show_ip6_stats(struct blob_buf *b)
 
 void qosify_map_show_table_v4(struct blob_buf *b)
 {
-	struct qosify_traffic_stats_val val;
+	struct qosify_conn_stats conn;
+	struct qosify_traffic_stats_val *val;
 	struct qosify_flowv4_keys key, next_key;
 	int fd = qosify_map_fds[CL_MAP_TABLE_V4];
 	void *a;
@@ -1024,11 +1025,11 @@ void qosify_map_show_table_v4(struct blob_buf *b)
 
 	memset(&key, 0, sizeof(key));
 	memset(&next_key, 0, sizeof(next_key));
-	memset(&val, 0, sizeof(val));
+	memset(&conn, 0, sizeof(conn));
 
 	a = blobmsg_open_array(b, "table_v4");
 	while (bpf_map_get_next_key(fd, &key, &next_key) == 0) {
-		if (bpf_map_lookup_elem(fd, &next_key, &val) < 0)
+		if (bpf_map_lookup_elem(fd, &next_key, &conn) < 0)
 			break;
 
 		void *c = blobmsg_open_table(b, NULL);
@@ -1038,11 +1039,14 @@ void qosify_map_show_table_v4(struct blob_buf *b)
 		blobmsg_add_u32(b, "dst_port", ntohs(next_key.dst_port));
 		blobmsg_add_u32(b, "proto", next_key.proto);
 		// add stats
+		val = &conn.val;
 		for (int i = 0; i < DIRECTION_MAX; i++) {
-			blobmsg_add_u32(b, dir_rate_str[i], calc_rate_estimator(&val, i));
-			blobmsg_add_u64(b, dir_bytes_str[i], val.stats[i].total_bytes);
-			blobmsg_add_u64(b, dir_packets_str[i], val.stats[i].total_packets);
+			blobmsg_add_u32(b, dir_rate_str[i], calc_rate_estimator(val, i));
+			blobmsg_add_u64(b, dir_bytes_str[i], val->stats[i].total_bytes);
+			blobmsg_add_u64(b, dir_packets_str[i], val->stats[i].total_packets);
 		}
+		blobmsg_add_u32(b, "dpi_id", conn.dpi_id);
+		blobmsg_add_u32(b, "dpi_pkt_num", conn.dpi_pkt_num);
 		blobmsg_close_table(b, c);
 		key = next_key;
 		count++;
@@ -1054,7 +1058,8 @@ void qosify_map_show_table_v4(struct blob_buf *b)
 
 void qosify_map_show_table_v6(struct blob_buf *b)
 {
-	struct qosify_traffic_stats_val val;
+	struct qosify_conn_stats conn;
+	struct qosify_traffic_stats_val *val;
 	struct qosify_flowv6_keys key, next_key;
 	int fd = qosify_map_fds[CL_MAP_TABLE_V6];
 	void *a;
@@ -1062,11 +1067,11 @@ void qosify_map_show_table_v6(struct blob_buf *b)
 
 	memset(&key, 0, sizeof(key));
 	memset(&next_key, 0, sizeof(next_key));
-	memset(&val, 0, sizeof(val));
+	memset(&conn, 0, sizeof(conn));
 
 	a = blobmsg_open_array(b, "table_v6");
 	while (bpf_map_get_next_key(fd, &key, &next_key) == 0) {
-		if (bpf_map_lookup_elem(fd, &next_key, &val) < 0)
+		if (bpf_map_lookup_elem(fd, &next_key, &conn) < 0)
 			break;
 
 		void *c = blobmsg_open_table(b, NULL);
@@ -1079,11 +1084,14 @@ void qosify_map_show_table_v6(struct blob_buf *b)
 		blobmsg_add_u32(b, "dst_port", ntohs(next_key.dst_port));
 		blobmsg_add_u32(b, "proto", next_key.proto);
 		// add stats
+		val = &conn.val;
 		for (int i = 0; i < DIRECTION_MAX; i++) {
-			blobmsg_add_u32(b, dir_rate_str[i], calc_rate_estimator(&val, i));
-			blobmsg_add_u64(b, dir_bytes_str[i], val.stats[i].total_bytes);
-			blobmsg_add_u64(b, dir_packets_str[i], val.stats[i].total_packets);
+			blobmsg_add_u32(b, dir_rate_str[i], calc_rate_estimator(val, i));
+			blobmsg_add_u64(b, dir_bytes_str[i], val->stats[i].total_bytes);
+			blobmsg_add_u64(b, dir_packets_str[i], val->stats[i].total_packets);
 		}
+		blobmsg_add_u32(b, "dpi_id", conn.dpi_id);
+		blobmsg_add_u32(b, "dpi_pkt_num", conn.dpi_pkt_num);
 		blobmsg_close_table(b, c);
 		memcpy(&key, &next_key, sizeof(key));
 		count++;
