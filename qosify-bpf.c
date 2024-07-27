@@ -505,9 +505,10 @@ dpi_match_scan(const __u8 *payload, const __u8 *pattern, __u32 pattern_len, __u3
 static long 
 dpi_match_iterator_cb(__u32 index, void *ctx)
 {
+	#if 0
 	struct qosify_dpi_match_pattern *pattern = bpf_map_lookup_elem(&dpi_match_map, &index);
 	struct dpi_match_ctx *match_ctx = (struct dpi_match_ctx *)ctx;
-	if (!pattern) {
+	if (!pattern || pattern->dpi_id == 0) {
 		bpf_printk("dpi_match_iterator_cb: end of pattern \n");
 		return 1; // stop the loop
 	}
@@ -528,12 +529,14 @@ dpi_match_iterator_cb(__u32 index, void *ctx)
 		bpf_printk("dpi_match_iterator_cb: match found %d \n", pattern->dpi_id);
 		return 1; // stop the loop
 	}
+	#endif
 	return 0;
 }
 
 static  __u16
 dpi_engine_match(__u8 proto, __u16 dport, __u8 *payload, __u32 payload_len, bool ingress)
 {
+#if 0
 	struct dpi_match_ctx ctx;
 	__builtin_memset(&ctx, 0, sizeof(ctx));
 	ctx.proto = proto;
@@ -543,7 +546,7 @@ dpi_engine_match(__u8 proto, __u16 dport, __u8 *payload, __u32 payload_len, bool
 	ctx.ingress = ingress;
 
 	bpf_loop(DPI_MAX_NUM, dpi_match_iterator_cb, &ctx, 0);
-
+#endif
 	return 0;
 }
 
@@ -567,6 +570,7 @@ dpi4_engine(struct iphdr *iph, struct skb_parser_info *info, bool ingress, __u32
 	__u32 payload_len = 0;
 	__u32 key = 0;
 	__u8 dpi_max_check = 0;
+	__u32 dpi_id = 0;
 
 	__builtin_memset(&keys, 0, sizeof(keys));
 	keys.proto = iph->protocol;
@@ -607,40 +611,49 @@ dpi4_engine(struct iphdr *iph, struct skb_parser_info *info, bool ingress, __u32
 	if (payload_len == 0) {
 		return;
 	}
-
-	bpf_printk("dpi4_engine: %d %d %d\n", keys.src_ip, ntohs(keys.dst_port), keys.proto);
+	
 	stats = bpf_map_lookup_elem(&flow_table_v4_map, &keys);
 	if (stats) {
+		bpf_printk("dpi4_engine: %d %d %d\n", keys.src_ip, ntohs(keys.dst_port), keys.proto);
+		bpf_printk("stats->dpi_id %d, stats->dpi_pkt_num %d\n", stats->dpi_id, stats->dpi_pkt_num);
 		if (!stats->dpi_id && stats->dpi_pkt_num >= dpi_max_check){
 			stats->dpi_id = DPI_MAX_NUM;
-		} else if (!stats->dpi_id && ingress) {
+		} else if (!stats->dpi_id) {
 			stats->dpi_id = dpi_engine_match(keys.proto, keys.dst_port, payload, payload_len, ingress);
 			stats->dpi_pkt_num++;
 		}
 		rate_estimator(&stats->val, now, info->skb->len, ingress);
 		bpf_map_update_elem(&flow_table_v4_map, &keys, stats, BPF_ANY);
-		if (stats->dpi_id) {
-			dpi_val = bpf_map_lookup_elem(&dpi_stats_map, &stats->dpi_id);
-			if (dpi_val) {
-				rate_estimator(dpi_val, now, payload_len, ingress);
-				bpf_map_update_elem(&dpi_stats_map, &stats->dpi_id, dpi_val, BPF_ANY);
-			} else {
-				struct qosify_traffic_stats_val new_val;
-				__builtin_memset(&new_val, 0, sizeof(new_val));
-				new_val.stats[ingress].cur_s_bytes = payload_len;
-				new_val.stats[ingress].total_bytes = payload_len;
-				new_val.stats[ingress].total_packets = 1;
-				bpf_map_update_elem(&dpi_stats_map, &stats->dpi_id, &new_val, BPF_ANY);
-			}
-		}
+		dpi_id = stats->dpi_id;
 	} else {
 		struct qosify_conn_stats new_stats;
 		__builtin_memset(&new_stats, 0, sizeof(new_stats));
+		bpf_printk("dpi4_engine: new conn %d %d %d\n", keys.src_ip, ntohs(keys.dst_port), keys.proto);
 		new_stats.val.est_slot = now;
 		new_stats.val.stats[ingress].cur_s_bytes = info->skb->len;
 		new_stats.val.stats[ingress].total_bytes = info->skb->len;
 		new_stats.val.stats[ingress].total_packets = 1;
+
+		new_stats.dpi_id = dpi_engine_match(keys.proto, keys.dst_port, payload, payload_len, ingress);
+		new_stats.dpi_pkt_num++;
+
 		bpf_map_update_elem(&flow_table_v4_map, &keys, &new_stats, BPF_ANY);
+		dpi_id = new_stats.dpi_id;
+	}
+
+	if (dpi_id) {
+		dpi_val = bpf_map_lookup_elem(&dpi_stats_map, &dpi_id);
+		if (dpi_val) {
+			rate_estimator(dpi_val, now, payload_len, ingress);
+			bpf_map_update_elem(&dpi_stats_map, &dpi_id, dpi_val, BPF_ANY);
+		} else {
+			struct qosify_traffic_stats_val new_val;
+			__builtin_memset(&new_val, 0, sizeof(new_val));
+			new_val.stats[ingress].cur_s_bytes = payload_len;
+			new_val.stats[ingress].total_bytes = payload_len;
+			new_val.stats[ingress].total_packets = 1;
+			bpf_map_update_elem(&dpi_stats_map, &dpi_id, &new_val, BPF_ANY);
+		}
 	}
 }
 
