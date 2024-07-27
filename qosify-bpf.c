@@ -32,7 +32,7 @@
 
 #define EWMA_SHIFT		12
 
-long (* const bpf_loop)(u32 nr_loops, void *callback_fn, void *callback_ctx, u64 flags) __ksym;
+// long (* const bpf_loop)(u32 nr_loops, void *callback_fn, void *callback_ctx, u64 flags) __ksym;
 
 const volatile static uint32_t module_flags = 0;
 
@@ -494,15 +494,22 @@ dpi_match_scan(const __u8 *payload, const __u8 *pattern, __u32 pattern_len, __u3
 	len = payload_len - pattern_len;
 	if (len > MAX_SCAN_LEN)
 		len = MAX_SCAN_LEN;
+	if (pattern_len > MAX_PATTERN_LEN)
+		pattern_len = MAX_PATTERN_LEN;
 	for (i = 0; i < payload_len-pattern_len; i++) {
-		if (memcmp(payload + i, pattern, pattern_len) == 0)
-			return 0;
+		for (int j = 0; j < pattern_len; j++) {
+			if (payload[i+j] != pattern[j])
+				break;
+			if (j == pattern_len - 1)
+				return 0;
+		}
 	}
 
 	return 1;
 }
 
-static long 
+
+static __always_inline long 
 dpi_match_iterator_cb(__u32 index, void *ctx)
 {
 	#if 0
@@ -529,14 +536,25 @@ dpi_match_iterator_cb(__u32 index, void *ctx)
 		bpf_printk("dpi_match_iterator_cb: match found %d \n", pattern->dpi_id);
 		return 1; // stop the loop
 	}
-	#endif
+	
+	bpf_printk("dpi_match_iterator_cb: index %d \n", index);
 	return 0;
+	#endif
+	return 1;
 }
 
+#if 0
+static __always_inline long
+dpi_match_iterator_cb(struct bpf_map *map, const void *key, void *value, void *ctx)
+{
+	return 0;
+}
+#endif
 static  __u16
 dpi_engine_match(__u8 proto, __u16 dport, __u8 *payload, __u32 payload_len, bool ingress)
 {
-#if 0
+#if 1
+	__u32 count = DPI_MAX_NUM;
 	struct dpi_match_ctx ctx;
 	__builtin_memset(&ctx, 0, sizeof(ctx));
 	ctx.proto = proto;
@@ -545,9 +563,42 @@ dpi_engine_match(__u8 proto, __u16 dport, __u8 *payload, __u32 payload_len, bool
 	ctx.payload_len = payload_len;
 	ctx.ingress = ingress;
 
-	bpf_loop(DPI_MAX_NUM, dpi_match_iterator_cb, &ctx, 0);
+	int ret = bpf_loop(5, dpi_match_iterator_cb, &ctx, 0);
+	if (ret < 0)
+		bpf_printk("dpi_engine_match: bpf_loop failed %d\n", ret);
+	
+	return ctx.dpi_id;
 #endif
+#if 0
+	struct bpf_iter_num it;
+	__u32 *v;
+
+	bpf_iter_num_new(&it, 0, DPI_MAX_NUM);
+	while((v = bpf_iter_num_next(&it))) {
+		struct qosify_dpi_match_pattern *pattern = bpf_map_lookup_elem(&dpi_match_map, v);
+		if (!pattern || pattern->dpi_id == 0) {
+			bpf_printk("dpi_match_iterator_cb: end of pattern \n");
+			break;
+		}
+
+		if (pattern->proto != proto || (!pattern->dport && pattern->dport != dport))
+			continue;
+		
+		if ((!pattern->start && pattern->start >= payload_len)||
+			(!pattern->end && pattern->end > payload_len) ||
+			pattern->pattern_len > payload_len)
+			continue;
+
+		if (dpi_match_scan(payload + pattern->start,
+			pattern->pattern, pattern->pattern_len,
+			pattern->end? pattern->end : payload_len ) == 0) {
+			bpf_printk("dpi_engine_match: match found %d \n", pattern->dpi_id);
+			return pattern->dpi_id;
+		}
+	}
+
 	return 0;
+#endif
 }
 
 static __always_inline __u8
