@@ -11,6 +11,7 @@
 #include <uapi/linux/ip.h>
 #include <uapi/linux/ipv6.h>
 #include <linux/ip.h>
+#include <linux/if_vlan.h>
 #include <net/ipv6.h>
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
