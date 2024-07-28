@@ -23,6 +23,7 @@
 #include "bpf_skb_utils.h"
 #include "qosify-bpf.h"
 #include "jhash.h"
+#include "builtins.h"
 
 #define INET_ECN_MASK 3
 
@@ -31,8 +32,6 @@
 #define FLOW_BULK_TIMEOUT	5
 
 #define EWMA_SHIFT		12
-
-// long (* const bpf_loop)(u32 nr_loops, void *callback_fn, void *callback_ctx, u64 flags) __ksym;
 
 const volatile static uint32_t module_flags = 0;
 
@@ -424,7 +423,7 @@ check_flow(struct qosify_flow_config *config, struct __sk_buff *skb,
 	hash = bpf_get_hash_recalc(skb);
 	flow = bpf_map_lookup_elem(&flow_map, &hash);
 	if (!flow) {
-		__builtin_memset(&flow_data, 0, sizeof(flow_data));
+		__bpf_memzero(&flow_data, sizeof(flow_data));
 		bpf_map_update_elem(&flow_map, &hash, &flow_data, BPF_ANY);
 		flow = bpf_map_lookup_elem(&flow_map, &hash);
 		if (!flow)
@@ -487,22 +486,19 @@ static __always_inline int
 dpi_match_scan(const __u8 *payload, const __u8 *pattern, __u32 pattern_len, __u32 payload_len)
 {
 #define MAX_SCAN_LEN 1000
-	__u8 i;
-	__u32 len;
+	__u16 i;
+	__u16 len;
+	if (pattern_len > MAX_PATTERN_LEN)
+		pattern_len = MAX_PATTERN_LEN;
 	if (pattern_len > payload_len)
 		return 1;
 	len = payload_len - pattern_len;
 	if (len > MAX_SCAN_LEN)
 		len = MAX_SCAN_LEN;
-	if (pattern_len > MAX_PATTERN_LEN)
-		pattern_len = MAX_PATTERN_LEN;
-	for (i = 0; i < payload_len-pattern_len; i++) {
-		for (int j = 0; j < pattern_len; j++) {
-			if (payload[i+j] != pattern[j])
-				break;
-			if (j == pattern_len - 1)
-				return 0;
-		}
+	
+	for (i = 0; i < len; i++) {
+		if (__bpf_memcmp(payload + i, pattern, pattern_len) == 0)
+			return 0;
 	}
 
 	return 1;
@@ -512,7 +508,6 @@ dpi_match_scan(const __u8 *payload, const __u8 *pattern, __u32 pattern_len, __u3
 static __always_inline long 
 dpi_match_iterator_cb(__u32 index, void *ctx)
 {
-	#if 0
 	struct qosify_dpi_match_pattern *pattern = bpf_map_lookup_elem(&dpi_match_map, &index);
 	struct dpi_match_ctx *match_ctx = (struct dpi_match_ctx *)ctx;
 	if (!pattern || pattern->dpi_id == 0) {
@@ -536,69 +531,28 @@ dpi_match_iterator_cb(__u32 index, void *ctx)
 		bpf_printk("dpi_match_iterator_cb: match found %d \n", pattern->dpi_id);
 		return 1; // stop the loop
 	}
-	
+
 	bpf_printk("dpi_match_iterator_cb: index %d \n", index);
 	return 0;
-	#endif
-	return 1;
 }
 
-#if 0
-static __always_inline long
-dpi_match_iterator_cb(struct bpf_map *map, const void *key, void *value, void *ctx)
-{
-	return 0;
-}
-#endif
 static  __u16
 dpi_engine_match(__u8 proto, __u16 dport, __u8 *payload, __u32 payload_len, bool ingress)
 {
-#if 1
 	__u32 count = DPI_MAX_NUM;
 	struct dpi_match_ctx ctx;
-	__builtin_memset(&ctx, 0, sizeof(ctx));
+	__bpf_memzero(&ctx, sizeof(ctx));
 	ctx.proto = proto;
 	ctx.dport = dport;
 	ctx.payload = payload;
 	ctx.payload_len = payload_len;
 	ctx.ingress = ingress;
 
-	int ret = bpf_loop(5, dpi_match_iterator_cb, &ctx, 0);
+	int ret = bpf_loop(count, dpi_match_iterator_cb, &ctx, 0);
 	if (ret < 0)
 		bpf_printk("dpi_engine_match: bpf_loop failed %d\n", ret);
 	
 	return ctx.dpi_id;
-#endif
-#if 0
-	struct bpf_iter_num it;
-	__u32 *v;
-
-	bpf_iter_num_new(&it, 0, DPI_MAX_NUM);
-	while((v = bpf_iter_num_next(&it))) {
-		struct qosify_dpi_match_pattern *pattern = bpf_map_lookup_elem(&dpi_match_map, v);
-		if (!pattern || pattern->dpi_id == 0) {
-			bpf_printk("dpi_match_iterator_cb: end of pattern \n");
-			break;
-		}
-
-		if (pattern->proto != proto || (!pattern->dport && pattern->dport != dport))
-			continue;
-		
-		if ((!pattern->start && pattern->start >= payload_len)||
-			(!pattern->end && pattern->end > payload_len) ||
-			pattern->pattern_len > payload_len)
-			continue;
-
-		if (dpi_match_scan(payload + pattern->start,
-			pattern->pattern, pattern->pattern_len,
-			pattern->end? pattern->end : payload_len ) == 0) {
-			bpf_printk("dpi_engine_match: match found %d \n", pattern->dpi_id);
-			return pattern->dpi_id;
-		}
-	}
-
-	return 0;
-#endif
 }
 
 static __always_inline __u8
@@ -623,7 +577,7 @@ dpi4_engine(struct iphdr *iph, struct skb_parser_info *info, bool ingress, __u32
 	__u8 dpi_max_check = 0;
 	__u32 dpi_id = 0;
 
-	__builtin_memset(&keys, 0, sizeof(keys));
+	__bpf_memzero(&keys, sizeof(keys));
 	keys.proto = iph->protocol;
 	keys.src_ip = ingress? iph->saddr : iph->daddr;
 	keys.dst_ip = ingress? iph->daddr : iph->saddr;
@@ -666,7 +620,7 @@ dpi4_engine(struct iphdr *iph, struct skb_parser_info *info, bool ingress, __u32
 	stats = bpf_map_lookup_elem(&flow_table_v4_map, &keys);
 	if (stats) {
 		bpf_printk("dpi4_engine: %d %d %d\n", keys.src_ip, ntohs(keys.dst_port), keys.proto);
-		bpf_printk("stats->dpi_id %d, stats->dpi_pkt_num %d\n", stats->dpi_id, stats->dpi_pkt_num);
+		bpf_printk("stats->dpi_id %d, stats->dpi_pkt_num %d ingress %d\n", stats->dpi_id, stats->dpi_pkt_num, ingress);
 		if (!stats->dpi_id && stats->dpi_pkt_num >= dpi_max_check){
 			stats->dpi_id = DPI_MAX_NUM;
 		} else if (!stats->dpi_id) {
@@ -678,7 +632,7 @@ dpi4_engine(struct iphdr *iph, struct skb_parser_info *info, bool ingress, __u32
 		dpi_id = stats->dpi_id;
 	} else {
 		struct qosify_conn_stats new_stats;
-		__builtin_memset(&new_stats, 0, sizeof(new_stats));
+		__bpf_memzero(&new_stats, sizeof(new_stats));
 		bpf_printk("dpi4_engine: new conn %d %d %d\n", keys.src_ip, ntohs(keys.dst_port), keys.proto);
 		new_stats.val.est_slot = now;
 		new_stats.val.stats[ingress].cur_s_bytes = info->skb->len;
@@ -699,7 +653,7 @@ dpi4_engine(struct iphdr *iph, struct skb_parser_info *info, bool ingress, __u32
 			bpf_map_update_elem(&dpi_stats_map, &dpi_id, dpi_val, BPF_ANY);
 		} else {
 			struct qosify_traffic_stats_val new_val;
-			__builtin_memset(&new_val, 0, sizeof(new_val));
+			__bpf_memzero(&new_val, sizeof(new_val));
 			new_val.stats[ingress].cur_s_bytes = payload_len;
 			new_val.stats[ingress].total_bytes = payload_len;
 			new_val.stats[ingress].total_packets = 1;
@@ -723,8 +677,8 @@ parse_ipv4(struct qosify_config *config, struct skb_parser_info *info,
 	struct qosify_ipv4_mask_config *mask = get_ipv4_mask();
 	__u32 addr_masked;
 
-	__builtin_memset(&addr, 0, sizeof(addr));
-	__builtin_memset(&new_val, 0, sizeof(new_val));
+	__bpf_memzero(&addr, sizeof(addr));
+	__bpf_memzero(&new_val, sizeof(new_val));
 
 	iph = skb_parse_ipv4(info, sizeof(struct udphdr));
 	if (!iph)
@@ -778,18 +732,18 @@ parse_ipv6(struct qosify_config *config, struct skb_parser_info *info,
 	struct qosify_traffic_stats_val new_val;
 	struct qosify_ipv6_mask_config *mask = get_ipv6_mask();
 
-	__builtin_memset(&addr, 0, sizeof(addr));
-	__builtin_memset(&new_val, 0, sizeof(new_val));
+	__bpf_memzero(&addr, sizeof(addr));
+	__bpf_memzero(&new_val, sizeof(new_val));
 
 	iph = skb_parse_ipv6(info, sizeof(struct udphdr));
 	if (!iph)
 		return NULL;
 
 	if (ingress) {
-		__builtin_memcpy(&addr, &iph->saddr, sizeof(addr));
+		__bpf_memcpy(&addr, &iph->saddr, sizeof(addr));
 		key = &iph->saddr;
 	} else {
-		__builtin_memcpy(&addr, &iph->daddr, sizeof(addr));
+		__bpf_memcpy(&addr, &iph->daddr, sizeof(addr));
 		key = &iph->daddr;
 	}
 
@@ -853,6 +807,8 @@ int classify(struct __sk_buff *skb)
 	bool force;
 	int type;
 
+	bpf_printk("module_flags %d\n", module_flags);
+
 	config = get_config();
 	if (!config) {
 		bpf_printk("no config\n");
@@ -867,7 +823,7 @@ int classify(struct __sk_buff *skb)
 		skb_parse_vlan(&info);
 		type = info.proto;
 	} else {
-		bpf_printk("no eth\n");
+		bpf_printk("no eth, ingress %d\n", ingress);
 		return TC_ACT_UNSPEC;
 	}
 
@@ -877,7 +833,7 @@ int classify(struct __sk_buff *skb)
 	else if (type == bpf_htons(ETH_P_IPV6))
 		ip_val = parse_ipv6(config, &info, ingress, &dscp);
 	else {
-		bpf_printk("no ip\n");
+		bpf_printk("no ip, ingress %d\n", ingress);
 		return TC_ACT_UNSPEC;
 	}
 
