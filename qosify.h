@@ -87,6 +87,7 @@ int qosify_run_cmd(char *cmd, bool ignore_error);
 
 int qosify_loader_init(void);
 const char *qosify_get_program(uint32_t flags, int *fd);
+const int qosify_get_chadpi_program(bool egress);
 
 int qosify_map_init(void);
 int qosify_map_dscp_value(const char *val, uint8_t *dscp);

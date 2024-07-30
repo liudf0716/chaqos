@@ -219,6 +219,47 @@ prepare_filter_cmd(char *buf, int len, const char *dev, int prio, bool add, bool
 }
 
 static int
+cmd_add_chadpi_bpf_filter(const char *ifname, int prio, bool egress)
+{
+	struct tcmsg tcmsg = {
+		.tcm_family = AF_UNSPEC,
+		.tcm_ifindex = if_nametoindex(ifname),
+	};
+	struct nl_msg *msg;
+	struct nlattr *opts;
+	int prog_fd = -1;
+	char name[32] = {0};
+
+	prog_fd = qosify_get_chadpi_program(egress);
+	if (prog_fd < 0)
+		return -1;
+
+	if (egress) {
+		tcmsg.tcm_parent = TC_H_MAKE(TC_H_CLSACT, TC_H_MIN_EGRESS);
+		snprintf(name, sizeof(name), "qosify_chadpi_egress");
+	} else {
+		tcmsg.tcm_parent = TC_H_MAKE(TC_H_CLSACT, TC_H_MIN_INGRESS);
+		snprintf(name, sizeof(name), "qosify_chadpi_ingress");
+	}
+
+	tcmsg.tcm_info = TC_H_MAKE(prio << 16, htons(ETH_P_ALL));
+
+	msg = nlmsg_alloc_simple(RTM_NEWTFILTER, NLM_F_REQUEST | NLM_F_CREATE | NLM_F_EXCL);
+	nlmsg_append(msg, &tcmsg, sizeof(tcmsg), NLMSG_ALIGNTO);
+	nla_put_string(msg, TCA_KIND, "bpf");
+
+	opts = nla_nest_start(msg, NLA_F_NESTED | TCA_OPTIONS);
+	nla_put_u32(msg, TCA_BPF_FD, prog_fd);
+	nla_put_string(msg, TCA_BPF_NAME, name);
+	nla_nest_end(msg, opts);
+
+	nl_send_auto_complete(rtnl_sock, msg);
+	nlmsg_free(msg);
+
+	return nl_wait_for_ack(rtnl_sock);
+}
+
+static int
 cmd_add_bpf_filter(const char *ifname, int prio, bool egress, bool eth)
 {
 	struct tcmsg tcmsg = {
@@ -303,6 +344,8 @@ cmd_add_ingress(struct qosify_iface *iface, bool eth)
 	int prio = QOSIFY_PRIO_BASE;
 	int ofs;
 
+	cmd_add_chadpi_bpf_filter(iface->ifname, prio++, false);
+
 	cmd_add_bpf_filter(iface->ifname, prio++, false, eth);
 
 	ofs = prepare_filter_cmd(buf, sizeof(buf), iface->ifname, prio++, true, false);
@@ -350,7 +393,10 @@ static int cmd_add_egress(struct qosify_iface *iface, bool eth)
 
 	cmd_add_qdisc(iface, iface->ifname, true, eth);
 
-	return cmd_add_bpf_filter(iface->ifname, QOSIFY_PRIO_BASE, true, eth);
+	if (cmd_add_chadpi_bpf_filter(iface->ifname, QOSIFY_PRIO_BASE, true))
+		return -1;
+
+	return cmd_add_bpf_filter(iface->ifname, QOSIFY_PRIO_BASE+2, true, eth);
 }
 
 static void

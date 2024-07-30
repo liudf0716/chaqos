@@ -579,14 +579,14 @@ dpi4_engine(struct iphdr *iph, struct skb_parser_info *info, bool ingress, __u32
 
 	__bpf_memzero(&keys, sizeof(keys));
 	keys.proto = iph->protocol;
-	keys.src_ip = ingress? iph->saddr : iph->daddr;
-	keys.dst_ip = ingress? iph->daddr : iph->saddr;
+	keys.dst_ip = ingress? iph->saddr : iph->daddr;
+	keys.src_ip = ingress? iph->daddr : iph->saddr;
 	if(iph->protocol == IPPROTO_TCP) {
 		struct tcphdr *tcph = skb_parse_tcp(info);
 		if (!tcph)
 			return;
-		keys.src_port = ingress? tcph->source : tcph->dest;
-		keys.dst_port = ingress? tcph->dest : tcph->source;
+		keys.dst_port = ingress? tcph->source : tcph->dest;
+		keys.src_port = ingress? tcph->dest : tcph->source;
 		if (check_tcp_finish(tcph)) {
 			if (bpf_map_lookup_elem(&flow_table_v4_map, &keys))
 				bpf_map_delete_elem(&flow_table_v4_map, &keys);
@@ -601,8 +601,8 @@ dpi4_engine(struct iphdr *iph, struct skb_parser_info *info, bool ingress, __u32
 		struct udphdr *udph = skb_parse_udp(info);
 		if (!udph)
 			return;
-		keys.src_port = ingress? udph->source : udph->dest;
-		keys.dst_port = ingress? udph->dest : udph->source;
+		keys.dst_port = ingress? udph->source : udph->dest;
+		keys.src_port = ingress? udph->dest : udph->source;
 		payload = skb_info_ptr(info, MIN_UDP_PAYLOAD_LEN);
 		if (!payload)
 			return;
@@ -664,7 +664,7 @@ dpi4_engine(struct iphdr *iph, struct skb_parser_info *info, bool ingress, __u32
 
 static __always_inline struct qosify_ip_map_val *
 parse_ipv4(struct qosify_config *config, struct skb_parser_info *info,
-	   bool ingress, __u8 *out_val)
+	   bool ingress, __u8 *out_val, bool dpi)
 {
 	struct iphdr *iph;
 	__u8 ipproto;
@@ -684,9 +684,7 @@ parse_ipv4(struct qosify_config *config, struct skb_parser_info *info,
 	if (!iph)
 		return NULL;
 
-	parse_l4proto(config, info, ingress, out_val);
-
-	if (ingress) {
+	if (!ingress) {
 		key = &iph->saddr;
 		addr.s_addr = iph->saddr;
 	} else {
@@ -694,14 +692,19 @@ parse_ipv4(struct qosify_config *config, struct skb_parser_info *info,
 		addr.s_addr = iph->daddr;
 	}
 
+	if (!dpi) {
+		parse_l4proto(config, info, ingress, out_val);
+		return bpf_map_lookup_elem(&ipv4_map, key);
+	}
+
 	if (!mask) {
 		bpf_printk("no mask\n");
-		return bpf_map_lookup_elem(&ipv4_map, key);
+		return NULL;
 	}
 
 	addr_masked = addr.s_addr & htonl(bits2mask(mask->prefix));
 	if (addr_masked != mask->ip4)
-		return bpf_map_lookup_elem(&ipv4_map, key);
+		return NULL;
 
 	dpi4_engine(iph, info, ingress, now);
 
@@ -721,7 +724,7 @@ parse_ipv4(struct qosify_config *config, struct skb_parser_info *info,
 
 static __always_inline struct qosify_ip_map_val *
 parse_ipv6(struct qosify_config *config, struct skb_parser_info *info,
-	   bool ingress, __u8 *out_val)
+	   bool ingress, __u8 *out_val, bool dpi)
 {
 	struct ipv6hdr *iph;
 	__u8 ipproto;
@@ -739,7 +742,7 @@ parse_ipv6(struct qosify_config *config, struct skb_parser_info *info,
 	if (!iph)
 		return NULL;
 
-	if (ingress) {
+	if (!ingress) {
 		__bpf_memcpy(&addr, &iph->saddr, sizeof(addr));
 		key = &iph->saddr;
 	} else {
@@ -747,21 +750,27 @@ parse_ipv6(struct qosify_config *config, struct skb_parser_info *info,
 		key = &iph->daddr;
 	}
 
-	if (!mask) {
+	if (!dpi) {
+		parse_l4proto(config, info, ingress, out_val);
 		return bpf_map_lookup_elem(&ipv6_map, key);
+	}
+
+	if (!mask) {
+		return NULL;
 	}
 
 	val = bpf_map_lookup_elem(&ipv6_stats_map, &addr);
 	if (val) {
 		rate_estimator(val, now / RATE_ESTIMATOR, info->skb->len, ingress);
+		bpf_map_update_elem(&ipv6_stats_map, &addr, val, BPF_ANY);
 	} else {
 		new_val.stats[ingress].cur_s_bytes = info->skb->len;
+		new_val.stats[ingress].total_bytes = info->skb->len;
+		new_val.stats[ingress].total_packets = 1;
 		bpf_map_update_elem(&ipv6_stats_map, &addr, &new_val, BPF_ANY);
 	}
 
-	parse_l4proto(config, info, ingress, out_val);
-
-	return bpf_map_lookup_elem(&ipv6_map, key);
+	return NULL;
 }
 
 static __always_inline int
@@ -797,8 +806,7 @@ SEC("tc")
 int classify(struct __sk_buff *skb)
 {
 	struct skb_parser_info info;
-	//bool ingress = module_flags & QOSIFY_INGRESS;
-	bool ingress = skb->tc_index? 1 : 0;
+	bool ingress = module_flags & QOSIFY_INGRESS;
 	struct qosify_config *config;
 	struct qosify_class *class = NULL;
 	struct qosify_ip_map_val *ip_val;
@@ -808,11 +816,8 @@ int classify(struct __sk_buff *skb)
 	bool force;
 	int type;
 
-	bpf_printk("module_flags %d\n", module_flags);
-
 	config = get_config();
 	if (!config) {
-		bpf_printk("no config\n");
 		return TC_ACT_UNSPEC;
 	}
 
@@ -824,17 +829,15 @@ int classify(struct __sk_buff *skb)
 		skb_parse_vlan(&info);
 		type = info.proto;
 	} else {
-		bpf_printk("no eth, ingress %d\n", ingress);
 		return TC_ACT_UNSPEC;
 	}
 
 	iph_offset = info.offset;
 	if (type == bpf_htons(ETH_P_IP))
-		ip_val = parse_ipv4(config, &info, ingress, &dscp);
+		ip_val = parse_ipv4(config, &info, ingress, &dscp, false);
 	else if (type == bpf_htons(ETH_P_IPV6))
-		ip_val = parse_ipv6(config, &info, ingress, &dscp);
+		ip_val = parse_ipv6(config, &info, ingress, &dscp, false);
 	else {
-		bpf_printk("no ip, ingress %d\n", ingress);
 		return TC_ACT_UNSPEC;
 	}
 
@@ -865,6 +868,82 @@ int classify(struct __sk_buff *skb)
 		ipv6_change_dsfield(skb, iph_offset, INET_ECN_MASK, dscp, force);
 
 	return TC_ACT_UNSPEC;
+}
+
+SEC("tc/egress")
+int chadpi_egress(struct __sk_buff *skb)
+{
+	struct skb_parser_info info;
+	bool ingress = 0;
+	struct qosify_config *config;
+	__u32 iph_offset;
+	int type;
+
+	config = get_config();
+	if (!config) {
+		bpf_printk("no config\n");
+		return TC_ACT_OK;
+	}
+
+	skb_parse_init(&info, skb);
+	if (skb_parse_ethernet(&info)) {
+		skb_parse_vlan(&info);
+		skb_parse_vlan(&info);
+		type = info.proto;
+	} else {
+		bpf_printk("no eth, egress %d\n", ingress);
+		return TC_ACT_OK;
+	}
+
+	iph_offset = info.offset;
+	if (type == bpf_htons(ETH_P_IP))
+		parse_ipv4(config, &info, ingress, NULL, true);
+	else if (type == bpf_htons(ETH_P_IPV6))
+		parse_ipv6(config, &info, ingress, NULL, true);
+	else {
+		bpf_printk("no ip, egress %d\n", ingress);
+		return TC_ACT_OK;
+	}
+
+	return TC_ACT_OK;
+}
+
+SEC("tc/ingress")
+int chadpi_ingress(struct __sk_buff *skb)
+{
+	struct skb_parser_info info;
+	bool ingress = 1;
+	struct qosify_config *config;
+	__u32 iph_offset;
+	int type;
+
+	config = get_config();
+	if (!config) {
+		bpf_printk("no config\n");
+		return TC_ACT_OK;
+	}
+
+	skb_parse_init(&info, skb);
+	if (skb_parse_ethernet(&info)) {
+		skb_parse_vlan(&info);
+		skb_parse_vlan(&info);
+		type = info.proto;
+	} else {
+		bpf_printk("no eth, ingress %d\n", ingress);
+		return TC_ACT_OK;
+	}
+
+	iph_offset = info.offset;
+	if (type == bpf_htons(ETH_P_IP))
+		parse_ipv4(config, &info, ingress, NULL, true);
+	else if (type == bpf_htons(ETH_P_IPV6))
+		parse_ipv6(config, &info, ingress, NULL, true);
+	else {
+		bpf_printk("no ip, ingress %d\n", ingress);
+		return TC_ACT_OK;
+	}
+
+	return TC_ACT_OK;
 }
 
 char _license[] SEC("license") = "GPL";

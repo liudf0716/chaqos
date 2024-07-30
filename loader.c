@@ -21,6 +21,14 @@ static struct {
 	{ "ingress_ip",  QOSIFY_INGRESS | QOSIFY_IP_ONLY },
 };
 
+static struct {
+	const char *suffix;
+	int fd;
+} bpf_chadpi_progs[] = {
+	{ "chadpi_ingress" },
+	{ "chadpi_egress" },
+};
+
 static int qosify_bpf_pr(enum libbpf_print_level level, const char *format,
 		     va_list args)
 {
@@ -64,6 +72,11 @@ const char *qosify_get_program(uint32_t flags, int *fd)
 	return NULL;
 }
 
+
+const int qosify_get_chadpi_program(bool egress)
+{
+	return bpf_chadpi_progs[egress].fd;
+}
 
 static int
 qosify_create_program(int idx)
@@ -123,6 +136,62 @@ qosify_create_program(int idx)
 	return 0;
 }
 
+static int
+chadpi_create_program(int idx)
+{
+	DECLARE_LIBBPF_OPTS(bpf_object_open_opts, opts,
+		.pin_root_path = CLASSIFY_DATA_PATH,
+	);
+	struct bpf_program *prog;
+	struct bpf_object *obj;
+	char path[256];
+	int err;
+
+	snprintf(path, sizeof(path), CLASSIFY_PIN_PATH "_" "%s", bpf_chadpi_progs[idx].suffix);
+
+	obj = bpf_object__open_file(CLASSIFY_PROG_PATH, &opts);
+	err = libbpf_get_error(obj);
+	if (err) {
+		perror("bpf_object__open_file");
+		return -1;
+	}
+
+	prog = bpf_object__find_program_by_name(obj, bpf_chadpi_progs[idx].suffix);
+	if (!prog) {
+		fprintf(stderr, "Can't find classifier prog\n");
+		return -1;
+	}
+
+	bpf_program__set_type(prog, BPF_PROG_TYPE_SCHED_CLS);
+
+	err = bpf_object__load(obj);
+	if (err) {
+		perror("bpf_object__load");
+		return -1;
+	}
+
+	libbpf_set_print(NULL);
+
+	unlink(path);
+	err = bpf_program__pin(prog, path);
+	if (err) {
+		fprintf(stderr, "Failed to pin program to %s: %s\n",
+			path, strerror(-err));
+		return -1;
+	}
+
+	bpf_object__close(obj);
+
+	err = bpf_obj_get(path);
+	if (err < 0) {
+		fprintf(stderr, "Failed to load pinned program %s: %s\n",
+			path, strerror(errno));
+	}
+	bpf_chadpi_progs[idx].fd = err;
+
+	return 0;
+}
+
 int qosify_loader_init(void)
 {
 	glob_t g;
@@ -139,6 +208,11 @@ int qosify_loader_init(void)
 
 	for (i = 0; i < ARRAY_SIZE(bpf_progs); i++) {
 		if (qosify_create_program(i))
+			return -1;
+	}
+
+	for (i = 0; i < ARRAY_SIZE(bpf_chadpi_progs); i++) {
+		if (chadpi_create_program(i))
 			return -1;
 	}
 
