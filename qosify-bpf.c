@@ -797,7 +797,8 @@ SEC("tc")
 int classify(struct __sk_buff *skb)
 {
 	struct skb_parser_info info;
-	bool ingress = module_flags & QOSIFY_INGRESS;
+	//bool ingress = module_flags & QOSIFY_INGRESS;
+	bool ingress = skb->tc_index? 1 : 0;
 	struct qosify_config *config;
 	struct qosify_class *class = NULL;
 	struct qosify_ip_map_val *ip_val;
