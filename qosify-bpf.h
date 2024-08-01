@@ -115,6 +115,7 @@ struct qosify_conn_stats {
 	struct qosify_traffic_stats_val val;
 	uint16_t dpi_id;
 	uint16_t dpi_pkt_num;
+	uint64_t last_seen;
 };
 
 struct qosify_dpi_list {

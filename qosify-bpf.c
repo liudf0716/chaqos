@@ -629,6 +629,7 @@ dpi4_engine(struct iphdr *iph, struct skb_parser_info *info, bool ingress, __u32
 			stats->dpi_pkt_num++;
 		}
 		rate_estimator(&stats->val, now, info->skb->len, ingress);
+		stats->last_seen = now;
 		bpf_map_update_elem(&flow_table_v4_map, &keys, stats, BPF_ANY);
 		dpi_id = stats->dpi_id;
 	} else {
@@ -642,6 +643,7 @@ dpi4_engine(struct iphdr *iph, struct skb_parser_info *info, bool ingress, __u32
 
 		new_stats.dpi_id = dpi_engine_match(keys.proto, keys.dst_port, payload, payload_len, ingress);
 		new_stats.dpi_pkt_num++;
+		new_stats.last_seen = now;
 
 		bpf_map_update_elem(&flow_table_v4_map, &keys, &new_stats, BPF_ANY);
 		dpi_id = new_stats.dpi_id;
