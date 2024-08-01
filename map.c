@@ -938,18 +938,18 @@ calc_rate_estimator(struct qosify_traffic_stats_val *val, bool ingress)
 }
 
 const char *dir_rate_str[] = {
-	"egress",
 	"ingress",
+	"egress",
 };
 
 const char *dir_bytes_str[] = {
-	"egress_bytes",
 	"ingress_bytes",
+	"egress_bytes",
 };
 
 const char *dir_packets_str[] = {
-	"egress_packets",
 	"ingress_packets",
+	"egress_packets",
 };
 
 void qosify_map_show_ip4_stats(struct blob_buf *b)
