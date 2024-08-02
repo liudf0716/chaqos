@@ -109,12 +109,15 @@ int qosify_map_add_dns_host(char *host, const char *addr, const char *type, int 
 int qosify_map_set_ipv4_mask(char *ip4, uint32_t prefix);
 int qosify_map_set_ipv6_mask(char *ip6, uint32_t prefix);
 int qosify_map_add_dpi_match(struct qosify_dpi_match_pattern *dpi_match);
+
 void qosify_map_show_ip4_stats(struct blob_buf *b);
 void qosify_map_show_ip6_stats(struct blob_buf *b);
 void qosify_map_show_table_v4(struct blob_buf *b);
 void qosify_map_show_table_v6(struct blob_buf *b);
 void qosify_map_show_dpi_stats(struct blob_buf *b);
 void qosify_map_show_dpi_match(struct blob_buf *b);
+void qosify_show_l7_proto(struct blob_buf *b);
+
 void qosify_net_mask_config_update(struct blob_attr *attr);
 void qosify_map_clear_list(enum qosify_map_id id);
 int map_parse_flow_config(struct qosify_flow_config *cfg, struct blob_attr *attr,

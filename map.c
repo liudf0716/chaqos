@@ -16,6 +16,7 @@
 #include <libubox/avl-cmp.h>
 
 #include "qosify.h"
+#include "chadpi.h"
 
 struct qosify_map_class;
 
@@ -1162,6 +1163,22 @@ void qosify_map_show_dpi_match(struct blob_buf *b)
 	blobmsg_close_array(b, a);
 
 	blobmsg_add_u32(b, "dpi_match_count", count);
+}
+
+void qosify_show_l7_proto(struct blob_buf *b)
+{
+	void *c = blobmsg_open_array(b, "l7_proto");
+	for (int i = 0; i < sizeof(chaqos_dpi_l7_proto) / sizeof(chaqos_dpi_l7_proto[0]); i++)
+	{
+		void *d = blobmsg_open_table(b, NULL);
+		blobmsg_add_u32(b, "id", chaqos_dpi_l7_proto[i].id);
+		blobmsg_add_string(b, "name", chaqos_dpi_l7_proto[i].name);
+		blobmsg_add_string(b, "desc", chaqos_dpi_l7_proto[i].desc);
+		blobmsg_close_table(b, d);
+	}
+	blobmsg_close_array(b, c);
+
+	blobmsg_add_u32(b, "l7_proto_count", sizeof(chaqos_dpi_l7_proto) / sizeof(chaqos_dpi_l7_proto[0]));
 }
 
 int qosify_map_add_dpi_match(struct qosify_dpi_match_pattern *dpi_match)

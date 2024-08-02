@@ -524,6 +524,19 @@ qosify_ubus_show_all_stats(struct ubus_context *ctx, struct ubus_object *obj,
 	return 0;
 }
 
+static int
+qosify_ubus_show_l7_proto(struct ubus_context *ctx, struct ubus_object *obj,
+			  struct ubus_request_data *req, const char *method,
+			  struct blob_attr *msg)
+{
+	blob_buf_init(&b, 0);
+	qosify_show_l7_proto(&b);
+	ubus_send_reply(ctx, req, b.head);
+	blob_buf_free(&b);
+
+	return 0;
+}
+
 static const struct ubus_method qosify_methods[] = {
 	UBUS_METHOD_NOARG("reload", qosify_ubus_reload),
 	UBUS_METHOD("add", qosify_ubus_add, qosify_add_policy),
@@ -544,6 +557,7 @@ static const struct ubus_method qosify_methods[] = {
 	UBUS_METHOD_NOARG("show_dpi_match", qosify_ubus_show_dpi_match),
 	UBUS_METHOD("dpi_match", qosify_ubus_add_dpi_match, qosify_dpi_match_policy),
 	UBUS_METHOD_NOARG("show_all_stats", qosify_ubus_show_all_stats),
+	UBUS_METHOD_NOARG("show_l7_proto", qosify_ubus_show_l7_proto),
 };
 
 static struct ubus_object_type qosify_object_type =
