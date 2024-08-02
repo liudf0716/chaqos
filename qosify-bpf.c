@@ -552,7 +552,9 @@ dpi_engine_match(__u8 proto, __u16 dport, __u8 *payload, __u32 payload_len, bool
 	if (ret < 0)
 		bpf_printk("dpi_engine_match: bpf_loop failed %d\n", ret);
 	
-	
+	if (ctx.dpi_id == 0 && !ingress)
+		ctx.dpi_id = dpi_match_extension(proto, dport, payload, payload_len, ingress);
+		
 	return ctx.dpi_id;
 }
 
@@ -623,7 +625,7 @@ dpi4_engine(struct iphdr *iph, struct skb_parser_info *info, bool ingress, __u32
 		bpf_printk("dpi4_engine: %d %d %d\n", keys.src_ip, ntohs(keys.dst_port), keys.proto);
 		bpf_printk("stats->dpi_id %d, stats->dpi_pkt_num %d ingress %d\n", stats->dpi_id, stats->dpi_pkt_num, ingress);
 		if (!stats->dpi_id && stats->dpi_pkt_num >= dpi_max_check){
-			stats->dpi_id = dpi_match_extension(keys.proto, keys.dst_port, payload, payload_len, ingress);
+			stats->dpi_id = CHADPI_L7_UNKNOWN;
 		} else if (!stats->dpi_id) {
 			stats->dpi_id = dpi_engine_match(keys.proto, keys.dst_port, payload, payload_len, ingress);
 			stats->dpi_pkt_num++;

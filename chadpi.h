@@ -131,7 +131,7 @@ dpi_match_extension(__u8 proto, __u16 dport, __u8 *payload, __u32 payload_len, b
 		case 5355:
 			return CHADPI_L7_LLMNR;
 		default:
-			return CHADPI_L7_TCP;
+			return 0;
 		}
 	}
 
@@ -154,11 +154,11 @@ dpi_match_extension(__u8 proto, __u16 dport, __u8 *payload, __u32 payload_len, b
 		case 5355:
 			return CHADPI_L7_LLMNR;
 		default:
-			return CHADPI_L7_UDP;
+			return 0;
 		}
 	}
 
-	return CHADPI_L7_UNKNOWN;
+	return 0;
 }
 
 #endif
