@@ -654,6 +654,10 @@ dpi4_engine(struct iphdr *iph, struct skb_parser_info *info, bool ingress, __u32
 		dpi_id = new_stats.dpi_id;
 	}
 
+	if (dpi_id == 0) {
+		bpf_printk("dpi4_engine: dpi_id not found\n");
+		return;
+	}
 	
 	dpi_val = bpf_map_lookup_elem(&dpi_stats_map, &dpi_id);
 	if (dpi_val) {
