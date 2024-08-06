@@ -554,8 +554,8 @@ dpi_engine_match(__u8 proto, __u16 dport, __u8 *payload, __u32 payload_len, bool
 	
 	if (ctx.dpi_id == 0 && !ingress) {
 		bpf_printk("dpi_engine_match: dpi_id not found, try to match extension\n");
-		bpf_printk("dpi_engine_match: proto %d, dport %d, payload_len %d\n", proto, dport, payload_len);
-		ctx.dpi_id = dpi_match_extension(proto, dport, payload, payload_len, ingress);
+		bpf_printk("dpi_engine_match: proto %d, dport %d, payload_len %d\n", proto, bpf_htons(dport), payload_len);
+		ctx.dpi_id = dpi_match_extension(proto, bpf_htons(dport), payload, payload_len, ingress);
 	}
 		
 	return ctx.dpi_id;
