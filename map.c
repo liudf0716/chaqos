@@ -1111,6 +1111,9 @@ void qosify_map_show_dpi_stats(struct blob_buf *b)
 	void *a;
 	uint32_t count = 0;
 
+	if (fd < 0)
+		return;
+		
 	a = blobmsg_open_array(b, "dpi_stats");
 	while (bpf_map_get_next_key(fd, &key, &next_key) == 0) {
 		if (bpf_map_lookup_elem(fd, &next_key, &val) < 0)

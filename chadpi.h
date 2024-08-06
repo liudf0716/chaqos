@@ -228,4 +228,17 @@ dpi_match_extension(__u8 proto, __u16 dport, __u8 *payload, __u32 payload_len, b
 	return 0;
 }
 
+static __always_inline __u16
+dpi_last_match(__u8 proto, __u16 dport, __u8 *payload, __u32 payload_len, bool ingress)
+{
+	switch(proto) {
+	case IPPROTO_TCP:
+		return CHADPI_L7_TCP;
+	case IPPROTO_UDP:
+		return CHADPI_L7_UDP;
+	}	
+
+	return CHADPI_L7_UNKNOWN;
+}
+
 #endif
