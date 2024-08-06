@@ -27,6 +27,7 @@
 #define QOSIFY_DNS_IFNAME "ifb-dns"
 
 #define QOSIFY_PRIO_BASE	0x110
+#define QOSIFY_PRIO_CHADPI_BASE	0x100
 
 enum qosify_map_id {
 	CL_MAP_TCP_PORTS,

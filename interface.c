@@ -342,9 +342,10 @@ cmd_add_ingress(struct qosify_iface *iface, bool eth)
 	const char *ifbdev = interface_ifb_name(iface);
 	char buf[256];
 	int prio = QOSIFY_PRIO_BASE;
+	int chadpi_prio = QOSIFY_PRIO_CHADPI_BASE;
 	int ofs;
 
-	cmd_add_chadpi_bpf_filter(iface->ifname, prio++, false);
+	cmd_add_chadpi_bpf_filter(iface->ifname, chadpi_prio, false);
 
 	cmd_add_bpf_filter(iface->ifname, prio++, false, eth);
 
@@ -393,10 +394,10 @@ static int cmd_add_egress(struct qosify_iface *iface, bool eth)
 
 	cmd_add_qdisc(iface, iface->ifname, true, eth);
 
-	if (cmd_add_chadpi_bpf_filter(iface->ifname, QOSIFY_PRIO_BASE, true))
+	if (cmd_add_chadpi_bpf_filter(iface->ifname, QOSIFY_PRIO_CHADPI_BASE, true))
 		return -1;
 
-	return cmd_add_bpf_filter(iface->ifname, QOSIFY_PRIO_BASE+2, true, eth);
+	return cmd_add_bpf_filter(iface->ifname, QOSIFY_PRIO_BASE, true, eth);
 }
 
 static void
@@ -408,6 +409,12 @@ interface_clear_qdisc(struct qosify_iface *iface)
 	prepare_qdisc_cmd(buf, sizeof(buf), iface->ifname, false, "root");
 	qosify_run_cmd(buf, true);
 
+	prepare_filter_cmd(buf, sizeof(buf), iface->ifname, QOSIFY_PRIO_CHADPI_BASE, false, false);
+	qosify_run_cmd(buf, true);
+
+	prepare_filter_cmd(buf, sizeof(buf), iface->ifname, QOSIFY_PRIO_CHADPI_BASE, false, true);
+	qosify_run_cmd(buf, true);
+	
 	for (i = 0; i < 6; i++) {
 		prepare_filter_cmd(buf, sizeof(buf), iface->ifname, QOSIFY_PRIO_BASE + i, false, false);
 		qosify_run_cmd(buf, true);
