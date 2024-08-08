@@ -484,11 +484,18 @@ rate_estimator(struct qosify_traffic_stats_val *val, __u32 est_slot, __u32 len, 
 }
 
 static __always_inline int
-dpi_match_scan(const __u8 *payload, const __u8 *pattern, __u32 pattern_len, __u32 payload_len)
+dpi_match_scan(struct skb_parser_info *info , struct qosify_dpi_match_pattern *pattern)
 {
 #define MAX_SCAN_LEN 1000
 	__u16 i;
 	__u16 len;
+	__u8 *payload_ptr = (__u8 *)skb_info_ptr(info, pattern->start);
+	if (!payload_ptr)
+		return 1;
+	__u32 payload_len = info->skb->len - info->offset;
+	if (pattern->end && pattern->end < payload_len)
+		payload_len = pattern->end;
+	__u32 pattern_len = pattern->pattern_len;
 	if (pattern_len > MAX_PATTERN_LEN)
 		pattern_len = MAX_PATTERN_LEN;
 	if (pattern_len > payload_len)
@@ -498,7 +505,7 @@ dpi_match_scan(const __u8 *payload, const __u8 *pattern, __u32 pattern_len, __u3
 		len = MAX_SCAN_LEN;
 	
 	for (i = 0; i < len; i++) {
-		if (__bpf_memcmp(payload + i, pattern, pattern_len) == 0)
+		if (__bpf_memcmp(payload_ptr + i, pattern, pattern_len) == 0)
 			return 0;
 	}
 
@@ -516,18 +523,16 @@ dpi_match_iterator_cb(__u32 index, void *ctx)
 		return 1; // stop the loop
 	}
 
-	
+	__u32 payload_len = match_ctx->info->skb->len - match_ctx->info->offset;
 	if (pattern->proto != match_ctx->proto || (!pattern->dport && pattern->dport != match_ctx->dport))
 		return 0;
 	
-	if ((!pattern->start && pattern->start >= match_ctx->payload_len)||
-		(!pattern->end && pattern->end > match_ctx->payload_len) ||
-		pattern->pattern_len > match_ctx->payload_len)
+	if ((!pattern->start && pattern->start >= payload_len)||
+		(!pattern->end && pattern->end > payload_len) ||
+		pattern->pattern_len > payload_len)
 		return 0;
 
-	if (dpi_match_scan(match_ctx->payload + pattern->start,
-		pattern->pattern, pattern->pattern_len,
-		pattern->end? pattern->end : match_ctx->payload_len ) == 0) {
+	if (dpi_match_scan(match_ctx->info, pattern) == 0) {
 		match_ctx->dpi_id = pattern->dpi_id;
 		bpf_printk("dpi_match_iterator_cb: match found %d \n", pattern->dpi_id);
 		return 1; // stop the loop
@@ -537,25 +542,24 @@ dpi_match_iterator_cb(__u32 index, void *ctx)
 }
 
 static  __u16
-dpi_engine_match(__u8 proto, __u16 dport, __u8 *payload, __u32 payload_len, bool ingress)
+dpi_engine_match(__u8 proto, __u16 dport, struct skb_parser_info *info, bool ingress)
 {
 	__u32 count = DPI_MAX_NUM;
 	struct dpi_match_ctx ctx;
 	__bpf_memzero(&ctx, sizeof(ctx));
 	ctx.proto = proto;
 	ctx.dport = dport;
-	ctx.payload = payload;
-	ctx.payload_len = payload_len;
 	ctx.ingress = ingress;
-
+	ctx.info = info;
+#if 0
 	int ret = bpf_loop(count, dpi_match_iterator_cb, &ctx, 0);
 	if (ret < 0)
 		bpf_printk("dpi_engine_match: bpf_loop failed %d\n", ret);
-	
+ #endif
 	if (ctx.dpi_id == 0 && !ingress) {
 		bpf_printk("dpi_engine_match: dpi_id not found, try to match extension\n");
-		bpf_printk("dpi_engine_match: proto %d, dport %d, payload_len %d\n", proto, bpf_htons(dport), payload_len);
-		ctx.dpi_id = dpi_match_extension(proto, bpf_htons(dport), payload, payload_len, ingress);
+		bpf_printk("dpi_engine_match: proto %d, dport %d\n", proto, bpf_htons(dport));
+		return dpi_match_extension(proto, bpf_htons(dport), info, ingress);
 	}
 		
 	return ctx.dpi_id;
@@ -577,7 +581,6 @@ dpi4_engine(struct iphdr *iph, struct skb_parser_info *info, bool ingress, __u32
 	struct qosify_flowv4_keys keys;
 	struct qosify_conn_stats *stats;
 	struct qosify_traffic_stats_val *dpi_val;
-	const __u8 *payload = NULL;
 	__u32 payload_len = 0;
 	__u32 key = 0;
 	__u8 dpi_max_check = 0;
@@ -598,9 +601,6 @@ dpi4_engine(struct iphdr *iph, struct skb_parser_info *info, bool ingress, __u32
 				bpf_map_delete_elem(&flow_table_v4_map, &keys);
 			return;
 		}
-		payload = skb_info_ptr(info, MIN_TCP_PAYLOAD_LEN);
-		if (!payload)
-			return;
 		payload_len = info->skb->len - info->offset;
 		dpi_max_check = 2;
 	} else if(iph->protocol == IPPROTO_UDP) {
@@ -609,9 +609,6 @@ dpi4_engine(struct iphdr *iph, struct skb_parser_info *info, bool ingress, __u32
 			return;
 		keys.dst_port = ingress? udph->source : udph->dest;
 		keys.src_port = ingress? udph->dest : udph->source;
-		payload = skb_info_ptr(info, MIN_UDP_PAYLOAD_LEN);
-		if (!payload)
-			return;
 		payload_len = info->skb->len - info->offset;
 		dpi_max_check = 3;
 		return;
@@ -622,15 +619,15 @@ dpi4_engine(struct iphdr *iph, struct skb_parser_info *info, bool ingress, __u32
 	if (payload_len == 0) {
 		return;
 	}
-	
+
 	stats = bpf_map_lookup_elem(&flow_table_v4_map, &keys);
 	if (stats) {
-		bpf_printk("dpi4_engine: %d %d %d\n", keys.src_ip, ntohs(keys.dst_port), keys.proto);
-		bpf_printk("stats->dpi_id %d, stats->dpi_pkt_num %d ingress %d\n", stats->dpi_id, stats->dpi_pkt_num, ingress);
+		//bpf_printk("dpi4_engine: %d %d %d\n", keys.src_ip, ntohs(keys.dst_port), keys.proto);
+		//bpf_printk("stats->dpi_id %d, stats->dpi_pkt_num %d ingress %d\n", stats->dpi_id, stats->dpi_pkt_num, ingress);
 		if (!stats->dpi_id && stats->dpi_pkt_num >= dpi_max_check){
-			stats->dpi_id = dpi_last_match(keys.proto, keys.dst_port, payload, payload_len, ingress);
+			stats->dpi_id = dpi_last_match(keys.proto, keys.dst_port, info, ingress);
 		} else if (!stats->dpi_id) {
-			stats->dpi_id = dpi_engine_match(keys.proto, keys.dst_port, payload, payload_len, ingress);
+			stats->dpi_id = dpi_engine_match(keys.proto, keys.dst_port, info, ingress);
 			stats->dpi_pkt_num++;
 		}
 		rate_estimator(&stats->val, now, info->skb->len, ingress);
@@ -646,7 +643,7 @@ dpi4_engine(struct iphdr *iph, struct skb_parser_info *info, bool ingress, __u32
 		new_stats.val.stats[ingress].total_bytes = info->skb->len;
 		new_stats.val.stats[ingress].total_packets = 1;
 
-		new_stats.dpi_id = dpi_engine_match(keys.proto, keys.dst_port, payload, payload_len, ingress);
+		new_stats.dpi_id = dpi_engine_match(keys.proto, keys.dst_port, info, ingress);
 		new_stats.dpi_pkt_num++;
 		new_stats.last_seen = now;
 
@@ -658,16 +655,16 @@ dpi4_engine(struct iphdr *iph, struct skb_parser_info *info, bool ingress, __u32
 		bpf_printk("dpi4_engine: dpi_id not found\n");
 		return;
 	}
-	
+
 	dpi_val = bpf_map_lookup_elem(&dpi_stats_map, &dpi_id);
 	if (dpi_val) {
-		bpf_printk("dpi4_engine: dpi_id %d, payload_len %d ingress %d\n", dpi_id, info->skb->len, ingress);
+		// bpf_printk("dpi4_engine: dpi_id %d, payload_len %d ingress %d\n", dpi_id, info->skb->len, ingress);
 		rate_estimator(dpi_val, now, info->skb->len, ingress);
 		bpf_map_update_elem(&dpi_stats_map, &dpi_id, dpi_val, BPF_ANY);
 	} else {
 		struct qosify_traffic_stats_val new_val;
 		__bpf_memzero(&new_val, sizeof(new_val));
-		bpf_printk("dpi4_engine: new dpi_id %d payload_len %d ingress %d\n", dpi_id, payload_len, ingress);
+		bpf_printk("dpi4_engine: new dpi_id %d  ingress %d\n", dpi_id, ingress);
 		new_val.stats[ingress].cur_s_bytes = info->skb->len;
 		new_val.stats[ingress].total_bytes = info->skb->len;
 		new_val.stats[ingress].total_packets = 1;
@@ -716,16 +713,21 @@ parse_ipv4(struct qosify_config *config, struct skb_parser_info *info,
 	}
 
 	addr_masked = addr.s_addr & htonl(bits2mask(mask->prefix));
-	if (addr_masked != mask->ip4)
+	if (addr_masked != mask->ip4) {
 		return NULL;
+	}
 
 	dpi4_engine(iph, info, ingress, now);
 
+	__u8 *bytes = (__u8 *)&addr.s_addr;
 	val = bpf_map_lookup_elem(&ipv4_stats_map, &addr);
+	bpf_printk("egree is %d, packet len is %d\n", ingress, info->skb->len);
 	if (val) {
+		bpf_printk("parse_ipv4: rate_estimator %d.%d.%d\n", bytes[0], bytes[1], bytes[3]);
 		rate_estimator(val, now, info->skb->len, ingress);
 		bpf_map_update_elem(&ipv4_stats_map, &addr, val, BPF_ANY);
 	} else {
+		bpf_printk("parse_ipv4: new_val %d.%d.%d\n", bytes[0], bytes[1], bytes[3]);
 		new_val.stats[ingress].cur_s_bytes = info->skb->len;
 		new_val.stats[ingress].total_bytes = info->skb->len;
 		new_val.stats[ingress].total_packets = 1;
@@ -756,10 +758,10 @@ parse_ipv6(struct qosify_config *config, struct skb_parser_info *info,
 		return NULL;
 
 	if (!ingress) {
-		__bpf_memcpy(&addr, &iph->saddr, sizeof(addr));
+		addr = iph->saddr;
 		key = &iph->saddr;
 	} else {
-		__bpf_memcpy(&addr, &iph->daddr, sizeof(addr));
+		addr = iph->daddr;
 		key = &iph->daddr;
 	}
 
@@ -889,7 +891,6 @@ int chadpi_egress(struct __sk_buff *skb)
 	struct skb_parser_info info;
 	bool ingress = 0;
 	struct qosify_config *config;
-	__u32 iph_offset;
 	int type;
 
 	config = get_config();
@@ -908,7 +909,6 @@ int chadpi_egress(struct __sk_buff *skb)
 		return TC_ACT_OK;
 	}
 
-	iph_offset = info.offset;
 	if (type == bpf_htons(ETH_P_IP))
 		parse_ipv4(config, &info, ingress, NULL, true);
 	else if (type == bpf_htons(ETH_P_IPV6))
@@ -924,10 +924,10 @@ int chadpi_egress(struct __sk_buff *skb)
 SEC("tc/ingress")
 int chadpi_ingress(struct __sk_buff *skb)
 {
+
 	struct skb_parser_info info;
 	bool ingress = 1;
-	struct qosify_config *config;
-	__u32 iph_offset;
+	struct qosify_config *config = NULL;
 	int type;
 
 	config = get_config();
@@ -937,6 +937,7 @@ int chadpi_ingress(struct __sk_buff *skb)
 	}
 
 	skb_parse_init(&info, skb);
+
 	if (skb_parse_ethernet(&info)) {
 		skb_parse_vlan(&info);
 		skb_parse_vlan(&info);
@@ -946,7 +947,6 @@ int chadpi_ingress(struct __sk_buff *skb)
 		return TC_ACT_OK;
 	}
 
-	iph_offset = info.offset;
 	if (type == bpf_htons(ETH_P_IP))
 		parse_ipv4(config, &info, ingress, NULL, true);
 	else if (type == bpf_htons(ETH_P_IPV6))

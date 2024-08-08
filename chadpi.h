@@ -133,7 +133,7 @@ static struct {
 };
 
 static __always_inline __u16
-dpi_match_extension(__u8 proto, __u16 dport, __u8 *payload, __u32 payload_len, bool ingress)
+dpi_match_extension(__u8 proto, __u16 dport, void *info, bool ingress)
 {
 	if (proto == IPPROTO_TCP) {
 		switch (dport) {
@@ -229,7 +229,7 @@ dpi_match_extension(__u8 proto, __u16 dport, __u8 *payload, __u32 payload_len, b
 }
 
 static __always_inline __u16
-dpi_last_match(__u8 proto, __u16 dport, __u8 *payload, __u32 payload_len, bool ingress)
+dpi_last_match(__u8 proto, __u16 dport, void *info, bool ingress)
 {
 	switch(proto) {
 	case IPPROTO_TCP:

@@ -190,10 +190,4 @@ skb_parse_udp(struct skb_parser_info *info)
 	return udph;
 }
 
-static __always_inline void *
-skb_parse_tcp_payload(struct skb_parser_info *info)
-{
-	return skb_info_ptr(info, info->skb->len - info->offset);
-}
-
 #endif

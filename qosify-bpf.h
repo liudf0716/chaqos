@@ -136,10 +136,9 @@ struct qosify_dpi_match_pattern {
 struct dpi_match_ctx {
 	__u8 proto;
 	__u16 dport;
-	__u8 *payload;
-	__u32 payload_len;
 	bool ingress;
 	__u16 dpi_id;
+	struct skb_parser_info *info;
 };
 
 #endif
